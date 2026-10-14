@@ -1,0 +1,99 @@
+version: "1.0"
+
+server:
+  port: 4000
+  storage:
+    type: "sqlite"
+    connection_string: "./data/orchestrator.db"
+  security:
+    default_safety_mode: "semi-autonomous" # autonomous | semi-autonomous | safe
+    allowed_workspaces:
+      - "./"
+      - "D:/"
+      - "C:/"
+
+inference:
+  default_provider: "direct"
+  providers:
+    # Uses your local authenticated Antigravity installation — NO API KEYS NEEDED!
+    agy:
+      type: "agy"
+      model: "gemini-3.8-flash-high"
+    agy_claude:
+      type: "agy"
+      model: "claude-sonnet-4-6"
+
+# Declarative agent definitions powered by your local agy models
+agents:
+  researcher:
+    role: "Research & Documentation Specialist"
+    provider: "agy"
+    tools: ["web_fetch", "fs_read", "fs_list"]
+    system_prompt: "You are an expert researcher. Synthesize concise and factual summaries."
+
+  coder:
+    role: "Senior Software Engineer"
+    provider: "agy"
+    tools: ["fs_read", "fs_write", "fs_list", "shell_exec"]
+    system_prompt: "You are a senior engineer. Write clean, robust code and verify changes."
+
+  reviewer:
+    role: "Staff Security & QA Auditor"
+    provider: "agy_claude"
+    tools: ["fs_read", "fs_list", "shell_exec"]
+    system_prompt: "You are a staff reviewer focused on correctness, edge cases, and security."
+
+# Preset pipelines
+pipelines:
+  feature_implementation:
+    stages:
+      - name: "research"
+        agent: "researcher"
+        output_artifact: "research_notes.md"
+        checkpoint: false
+      - name: "code"
+        agent: "coder"
+        input_artifacts: ["research_notes.md"]
+        output_artifact: "implementation.md"
+        checkpoint: true # Requires human approval via Web Dashboard or approve_checkpoint
+      - name: "review"
+        agent: "reviewer"
+        input_artifacts: ["implementation.md"]
+        checkpoint: false
+
+  database_design:
+    stages:
+      - name: "schema_modeling"
+        agent: "database-architect"
+        output_artifact: "schema_spec.md"
+        checkpoint: false
+      - name: "security_audit"
+        agent: "backend-reviewer"
+        input_artifacts: ["schema_spec.md"]
+        checkpoint: true
+
+  fullstack_feature:
+    stages:
+      - name: "architecture"
+        agent: "swarm-architect"
+        output_artifact: "architecture_spec.md"
+        checkpoint: false
+      - name: "frontend_ui"
+        agent: "frontend-designer"
+        input_artifacts: ["architecture_spec.md"]
+        output_artifact: "ui_component.tsx"
+        checkpoint: false
+      - name: "backend_api"
+        agent: "ts-backend-coder"
+        input_artifacts: ["architecture_spec.md"]
+        output_artifact: "api_routes.ts"
+        checkpoint: false
+      - name: "code_review"
+        agent: "code-reviewer"
+        input_artifacts: ["api_routes.ts"]
+        checkpoint: true
+      - name: "qa_verification"
+        agent: "qa-tester"
+        input_artifacts: ["api_routes.ts"]
+        output_artifact: "qa_report.md"
+        checkpoint: false

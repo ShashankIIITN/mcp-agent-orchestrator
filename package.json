@@ -1,0 +1,58 @@
+{
+  "name": "mcp-agent-orchestrator",
+  "version": "0.2.0",
+  "description": "Model Context Protocol multi-agent coordination kernel, cross-session mesh, and context firewall.",
+  "author": "Shashank Tripathi <shashanktripathi.st15a@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ShashankIIITN/mcp-agent-orchestrator.git"
+  },
+  "homepage": "https://github.com/ShashankIIITN/mcp-agent-orchestrator#readme",
+  "bugs": {
+    "url": "https://github.com/ShashankIIITN/mcp-agent-orchestrator/issues"
+  },
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "mcp-agent-orchestrator": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "orchestrator.example.yaml",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "orchestrator",
+    "multi-agent",
+    "swarm",
+    "agent-mesh"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "tsx tests/verify-orchestrator.ts && tsx tests/test-session-mesh.ts",
+    "lint": "eslint",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "better-sqlite3": "^11.8.2",
+    "yaml": "^2.7.1",
+    "zod": "^3.24.4",
+    "nanoid": "^5.1.3",
+    "pino": "^9.6.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.15.3",
+    "eslint": "^9.26.0",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3"
+  }
+}

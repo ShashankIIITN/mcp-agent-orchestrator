@@ -1,0 +1,125 @@
+version: "1.0"
+
+server:
+  port: 4000 # Embedded Web Dashboard running on http://localhost:4000
+  storage:
+    type: "sqlite"
+    connection_string: "./data/orchestrator.db"
+  security:
+    default_safety_mode: "semi-autonomous" # autonomous | semi-autonomous | safe
+    allowed_workspaces:
+      - "./"
+      - "./workspace"
+
+# ══════════════════════════════════════════════════════════════════════════
+# INFERENCE PROVIDERS CONFIGURATION
+# You can configure providers in 3 ways:
+#
+# 1. LOCAL SETUP (ZERO API KEYS):
+#    - "agy": Uses your locally authenticated Antigravity CLI installation.
+#      Supports models like "gemini-3.8-flash-high", "claude-sonnet-4-6", etc.
+#    - "ollama": Local Ollama server (e.g., http://localhost:11434).
+#
+# 2. CLOUD API KEYS:
+#    - "gemini": Direct Google Gemini REST API using GEMINI_API_KEY.
+#    - "anthropic": Direct Anthropic API using ANTHROPIC_API_KEY.
+#    - "openai": Direct OpenAI API using OPENAI_API_KEY.
+#    - "openai-compatible": Any custom endpoint (Groq, Together, DeepSeek, vLLM).
+#
+# 3. HYBRID SETUP:
+#    - Mix and match! Use local models for fast agents and cloud APIs for others.
+# ══════════════════════════════════════════════════════════════════════════
+inference:
+  default_provider: "direct"
+  providers:
+    # ── Option A: Local Antigravity (Zero API Keys) ──
+    agy:
+      type: "agy"
+      model: "gemini-3.8-flash-high"
+      # binary_path: "C:/custom/path/to/agy.exe" # optional (auto-detected by default)
+
+    agy_claude:
+      type: "agy"
+      model: "claude-sonnet-4-6"
+
+    # ── Option B: Local Ollama (Zero API Keys) ──
+    ollama:
+      type: "ollama"
+      base_url: "http://localhost:11434"
+      model: "llama3.3"
+
+    # ── Option C: Cloud API Providers ──
+    gemini:
+      type: "gemini"
+      model: "gemini-2.5-flash"
+      api_key_env: "GEMINI_API_KEY"
+
+    anthropic:
+      type: "anthropic"
+      model: "claude-3-7-sonnet-20250219"
+      api_key_env: "ANTHROPIC_API_KEY"
+
+    openai:
+      type: "openai"
+      model: "gpt-4o"
+      api_key_env: "OPENAI_API_KEY"
+
+    # ── Option D: Custom OpenAI-Compatible (DeepSeek, Groq, etc.) ──
+    deepseek:
+      type: "openai-compatible"
+      base_url: "https://api.deepseek.com"
+      model: "deepseek-coder"
+      api_key_env: "DEEPSEEK_API_KEY"
+
+# ══════════════════════════════════════════════════════════════════════════
+# SUBAGENT DEFINITIONS
+# Assign each agent whichever provider you prefer (local or cloud)
+# ══════════════════════════════════════════════════════════════════════════
+agents:
+  researcher:
+    role: "Research & Documentation Specialist"
+    provider: "agy" # or "gemini", "ollama", "openai"
+    tools: ["web_fetch", "fs_read", "fs_list"]
+    system_prompt: "You are an expert researcher. Synthesize factual and concise information."
+
+  coder:
+    role: "Senior Software Engineer"
+    provider: "agy" # or "anthropic", "deepseek"
+    tools: ["fs_read", "fs_write", "fs_list", "shell_exec"]
+    system_prompt: "You are a senior engineer writing clean, robust, and well-tested code."
+
+  reviewer:
+    role: "Staff Security & QA Auditor"
+    provider: "agy_claude" # or "anthropic"
+    tools: ["fs_read", "fs_list", "shell_exec"]
+    system_prompt: "You are a staff reviewer focused on correctness, edge cases, and security."
+
+# ══════════════════════════════════════════════════════════════════════════
+# PRESET PIPELINES
+# ══════════════════════════════════════════════════════════════════════════
+pipelines:
+  feature_implementation:
+    stages:
+      - name: "research"
+        agent: "researcher"
+        output_artifact: "research_notes.md"
+        checkpoint: false
+      - name: "code"
+        agent: "coder"
+        input_artifacts: ["research_notes.md"]
+        output_artifact: "implementation.md"
+        checkpoint: true # requires human approval before proceeding
+      - name: "review"
+        agent: "reviewer"
+        input_artifacts: ["implementation.md"]
+        checkpoint: false
+
+# ══════════════════════════════════════════════════════════════════════════
+# EXTERNAL MCP GATEWAYS
+# ══════════════════════════════════════════════════════════════════════════
+mcp_gateways:
+  github:
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-github"]
+    env:
+      GITHUB_PERSONAL_ACCESS_TOKEN: "${GITHUB_TOKEN}"
