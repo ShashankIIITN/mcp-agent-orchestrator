@@ -57,10 +57,11 @@ export const shellTool: SubagentTool = {
         cwd = validatePath(cwdArg, context.workspace_path);
       }
 
-      let timeoutArg = args.timeout as number | undefined ?? 30000;
-      if (timeoutArg > 300000) {
-        timeoutArg = 300000;
-      }
+      const rawTimeout = Number(args.timeout);
+      const timeoutArg =
+        Number.isFinite(rawTimeout) && rawTimeout > 0
+          ? Math.min(rawTimeout, 300000)
+          : 30000;
 
       const { stdout, stderr } = await execAsync(command, {
         cwd,

@@ -930,14 +930,19 @@ export class SessionManager {
       );
 
       const state = container.runtime.getState();
+      const finalStatus: SessionStatus = state.status === 'error' ? 'error' : 'idle';
       container.record.total_tool_calls = state.totalToolCalls;
       container.record.iterations = state.iterations;
-      container.record.status = 'idle';
-      container.runtime.setStatus('idle');
+      container.record.status = finalStatus;
+      if (state.lastError) {
+        container.record.last_error = state.lastError;
+      }
+      container.runtime.setStatus(finalStatus);
 
-      await this.storage.updateSessionStatus(sessionId, 'idle', {
+      await this.storage.updateSessionStatus(sessionId, finalStatus, {
         total_tool_calls: state.totalToolCalls,
         iterations: state.iterations,
+        last_error: state.lastError,
       });
 
       // Deliver reply to sender's inbox

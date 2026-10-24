@@ -9,10 +9,25 @@ import type {
   ChatMessage,
   CompletionOptions,
   CompletionResponse,
+  CompletionProgressEvent,
   ToolCall,
 } from '../types.js';
 
 const logger = createLogger('provider:agy');
+
+/**
+ * Built-in orchestrator tools that `agy` already provides natively at much higher speed
+ * (`read_file`/`view_file`, `list_dir`, `find_by_name`, `grep_search`, `run_command`, `write_to_file`, etc.).
+ * Omitting these from the prompt's synthetic JSON tool-call block avoids multi-process cold-start loops.
+ */
+const NATIVE_EQUIVALENT_TOOLS = new Set([
+  'fs_read',
+  'fs_write',
+  'fs_delete',
+  'fs_list',
+  'shell_exec',
+  'web_fetch',
+]);
 
 export interface AgyProviderOptions {
   binaryPath?: string;
@@ -35,6 +50,8 @@ interface AgyCliResponse {
     output_tokens?: number;
     total_tokens?: number;
   };
+  native_tool_calls_count?: number;
+  native_turns_count?: number;
 }
 
 /**
@@ -157,7 +174,13 @@ export class AgyProvider implements LLMProvider {
       );
       let outputJson: AgyCliResponse;
       try {
-        outputJson = await this.execAgy(prompt, requestedModel, existingConversationId, options?.workspacePath);
+        outputJson = await this.execAgy(
+          prompt,
+          requestedModel,
+          existingConversationId,
+          options?.workspacePath,
+          options?.onProgress,
+        );
       } catch (primaryErr) {
         const errText = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
         // Automatic quota / model availability fallback to gemini-3.8-flash-high
@@ -171,7 +194,13 @@ export class AgyProvider implements LLMProvider {
             { requestedModel, fallbackModel: 'gemini-3.8-flash-high' },
             'Primary model quota exhausted or unrecognized; falling back to gemini-3.8-flash-high',
           );
-          outputJson = await this.execAgy(prompt, 'gemini-3.8-flash-high', existingConversationId, options?.workspacePath);
+          outputJson = await this.execAgy(
+            prompt,
+            'gemini-3.8-flash-high',
+            existingConversationId,
+            options?.workspacePath,
+            options?.onProgress,
+          );
         } else {
           throw primaryErr;
         }
@@ -203,6 +232,8 @@ export class AgyProvider implements LLMProvider {
               total_tokens: outputJson.usage.total_tokens || 0,
             }
           : undefined,
+        native_tool_calls_count: outputJson.native_tool_calls_count,
+        native_turns_count: outputJson.native_turns_count,
       };
     } catch (error) {
       logger.error({ error }, 'Failed to complete via agy');
@@ -220,27 +251,38 @@ export class AgyProvider implements LLMProvider {
   private formatPrompt(messages: ChatMessage[], options?: CompletionOptions): string {
     let formatted = '';
 
-    if (options?.tools && options.tools.length > 0) {
-      formatted += `[SYSTEM INSTRUCTION]\nYou have access to the following tools:\n`;
-      for (const t of options.tools) {
-        formatted += `- ${t.name}: ${t.description}\n  Parameters: ${JSON.stringify(t.parameters)}\n`;
+    // Only expose non-builtin tools (such as mesh_* inter-session tools) as JSON codeblock tools.
+    // Built-in file/shell tools (fs_read, fs_list, shell_exec, etc.) are executed natively by agy
+    // inside a single CLI session at 100x higher speed.
+    const customTools = (options?.tools ?? []).filter((t) => !NATIVE_EQUIVALENT_TOOLS.has(t.name));
+
+    formatted += `[ORCHESTRATOR WORKER CONTEXT]\n`;
+    formatted += `- You are executing inside an isolated specialist session managed by mcp-agent-orchestrator.\n`;
+    formatted += `- Use your built-in file and search tools (read_file, view_file, list_dir, find_by_name, grep_search) directly for workspace inspection. Avoid recursively listing node_modules/, dist/, or .git/.\n`;
+    formatted += `- Do NOT call external mcp_agent-orchestrator_* MCP server tools from inside this worker session unless explicitly instructed.\n`;
+
+    if (customTools.length > 0) {
+      formatted += `- Optional inter-session mesh tools available ONLY if you explicitly need to message or spawn another orchestrator session:\n`;
+      for (const t of customTools) {
+        formatted += `  * ${t.name}: ${t.description} (Params: ${JSON.stringify(t.parameters)})\n`;
       }
-      formatted += `\nIf you need to call a tool to answer the user's request, respond ONLY with a JSON codeblock:\n\`\`\`json\n{\n  "tool_calls": [\n    {\n      "name": "tool_name",\n      "arguments": { ... }\n    }\n  ]\n}\n\`\`\`\nDo not add conversational preamble if you are calling a tool. If no tool is needed, respond with normal text.\n[/SYSTEM INSTRUCTION]\n\n`;
+      formatted += `  If (and only if) you need to invoke one of these mesh_* tools, respond ONLY with a JSON codeblock: \`\`\`json\n{"tool_calls":[{"name":"mesh_...","arguments":{...}}]}\n\`\`\`\n`;
     }
+    formatted += `[/ORCHESTRATOR WORKER CONTEXT]\n\n`;
 
     for (const msg of messages) {
       if (msg.role === 'system') {
-        formatted += `[SYSTEM]: ${msg.content}\n\n`;
+        formatted += `[SPECIALIST ROLE & SYSTEM PROMPT]:\n${msg.content}\n\n`;
       } else if (msg.role === 'user') {
-        formatted += `[USER]: ${msg.content}\n\n`;
+        formatted += `[USER TASK]:\n${msg.content}\n\n`;
       } else if (msg.role === 'assistant') {
-        formatted += `[ASSISTANT]: ${msg.content}\n\n`;
+        formatted += `[ASSISTANT]:\n${msg.content}\n\n`;
       } else if (msg.role === 'tool') {
-        formatted += `[TOOL RESULT${msg.tool_call_id ? ` id=${msg.tool_call_id}` : ''}]: ${msg.content}\n\n`;
+        formatted += `[TOOL RESULT${msg.tool_call_id ? ` id=${msg.tool_call_id}` : ''}]:\n${msg.content}\n\n`;
       }
     }
 
-    formatted += `[ASSISTANT]:`;
+    formatted += `Provide your complete, thorough response below:`;
     return formatted;
   }
 
@@ -272,7 +314,9 @@ export class AgyProvider implements LLMProvider {
     model: string,
     conversationId?: string,
     workspacePath?: string,
-    timeoutMs = 180000,
+    onProgress?: (event: CompletionProgressEvent) => void,
+    inactivityTimeoutMs = 180000,
+    maxTotalTimeoutMs = 600000,
   ): Promise<AgyCliResponse> {
     return new Promise((resolve, reject) => {
       const args = [
@@ -281,7 +325,7 @@ export class AgyProvider implements LLMProvider {
         '--model',
         model,
         '--output-format',
-        'json',
+        'stream-json',
         '--dangerously-skip-permissions',
       ];
 
@@ -307,32 +351,220 @@ export class AgyProvider implements LLMProvider {
       const proc = spawn(this.binaryPath, args, {
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
+        env: {
+          ...process.env,
+          MCP_AGENT_ORCHESTRATOR_WORKER: '1',
+        },
       });
 
       let stdout = '';
       let stderr = '';
+      let lineBuffer = '';
+      let streamedText = '';
+      let resolvedConversationId = conversationId;
+      let totalInputTokens = 0;
+      let totalOutputTokens = 0;
+      let nativeToolCallsCount = 0;
+      let nativeTurnsCount = 0;
+      let finalResult: AgyCliResponse | null = null;
+
+      let inactivityTimer: ReturnType<typeof setTimeout> | undefined;
+      const resetInactivityTimer = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          proc.kill();
+          reject(new Error(`agy execution timed out after ${inactivityTimeoutMs}ms of inactivity`));
+        }, inactivityTimeoutMs);
+      };
+      resetInactivityTimer();
+
+      const maxTimer = setTimeout(() => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        proc.kill();
+        reject(new Error(`agy execution exceeded maximum limit of ${maxTotalTimeoutMs}ms`));
+      }, maxTotalTimeoutMs);
+
+      const handleStreamLine = (rawLine: string) => {
+        const trimmed = rawLine.trim();
+        if (!trimmed.startsWith('{')) return;
+
+        try {
+          const parsed = JSON.parse(trimmed) as Record<string, any>;
+
+          // 1. Stream-JSON `init` event
+          if (parsed.event === 'init') {
+            if (typeof parsed.conversation_id === 'string') {
+              resolvedConversationId = parsed.conversation_id;
+            }
+            onProgress?.({
+              type: 'init',
+              conversationId: resolvedConversationId,
+              model: parsed.init?.model || model,
+            });
+            return;
+          }
+
+          // 2. Stream-JSON `step_update` event
+          if (parsed.event === 'step_update' && parsed.step_update) {
+            const su = parsed.step_update as Record<string, any>;
+            if (typeof su.conversation_id === 'string') {
+              resolvedConversationId = su.conversation_id;
+            }
+
+            if (su.step_type === 'agent_response') {
+              if (typeof su.text_delta === 'string' && su.text_delta.length > 0) {
+                streamedText += su.text_delta;
+                onProgress?.({
+                  type: 'text_delta',
+                  stepIndex: su.step_index,
+                  conversationId: resolvedConversationId,
+                  textDelta: su.text_delta,
+                  accumulatedText: streamedText,
+                });
+              }
+
+              if (su.state === 'DONE') {
+                nativeTurnsCount++;
+                const u = su.usage || {};
+                const stepIn = (u.input_tokens || 0) + (u.cache_read_tokens || 0);
+                const stepOut = (u.output_tokens || 0) + (u.thinking_tokens || 0);
+                totalInputTokens += stepIn;
+                totalOutputTokens += stepOut;
+
+                onProgress?.({
+                  type: 'thinking',
+                  stepIndex: su.step_index,
+                  conversationId: resolvedConversationId,
+                  durationSeconds: su.duration_seconds,
+                  accumulatedText: streamedText,
+                  usage: {
+                    input_tokens: u.input_tokens || 0,
+                    output_tokens: u.output_tokens || 0,
+                    thinking_tokens: u.thinking_tokens || 0,
+                    cache_read_tokens: u.cache_read_tokens || 0,
+                    total_tokens: stepIn + stepOut,
+                  },
+                });
+              }
+            } else if (su.step_type === 'tool') {
+              const toolName = su.tool_name || su.tool_info?.name || 'tool';
+              const toolArgs = su.tool_info?.parameters || {};
+              if (su.state === 'ACTIVE') {
+                onProgress?.({
+                  type: 'tool_start',
+                  stepIndex: su.step_index,
+                  conversationId: resolvedConversationId,
+                  toolName,
+                  toolArgs,
+                });
+              } else if (su.state === 'DONE') {
+                nativeToolCallsCount++;
+                onProgress?.({
+                  type: 'tool_done',
+                  stepIndex: su.step_index,
+                  conversationId: resolvedConversationId,
+                  toolName,
+                  toolArgs,
+                  toolOutput: typeof su.tool_info?.output === 'string' ? su.tool_info.output : undefined,
+                  durationSeconds: su.duration_seconds,
+                });
+              }
+            }
+            return;
+          }
+
+          // 3. Stream-JSON `result` event
+          if (parsed.event === 'result' && parsed.result) {
+            const resObj = parsed.result as Record<string, any>;
+            if (typeof resObj.conversation_id === 'string') {
+              resolvedConversationId = resObj.conversation_id;
+            }
+            finalResult = {
+              conversation_id: resolvedConversationId,
+              status: resObj.status || 'SUCCESS',
+              response: typeof resObj.response === 'string' ? resObj.response : streamedText,
+              usage: resObj.usage,
+            };
+            return;
+          }
+
+          // 4. Fallback for single-JSON output mode
+          if (typeof parsed.status === 'string' && ('response' in parsed || 'conversation_id' in parsed)) {
+            finalResult = parsed as unknown as AgyCliResponse;
+          }
+        } catch {
+          // Ignore partial or non-JSON lines
+        }
+      };
 
       proc.stdout.on('data', (chunk) => {
-        stdout += chunk.toString();
+        resetInactivityTimer();
+        const text = chunk.toString();
+        stdout += text;
+        lineBuffer += text;
+
+        let newlineIdx = lineBuffer.indexOf('\n');
+        while (newlineIdx !== -1) {
+          const line = lineBuffer.slice(0, newlineIdx);
+          lineBuffer = lineBuffer.slice(newlineIdx + 1);
+          handleStreamLine(line);
+          newlineIdx = lineBuffer.indexOf('\n');
+        }
       });
 
       proc.stderr.on('data', (chunk) => {
+        resetInactivityTimer();
         stderr += chunk.toString();
       });
 
-      const timer = setTimeout(() => {
-        proc.kill();
-        reject(new Error(`agy execution timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
       proc.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0) {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        clearTimeout(maxTimer);
+
+        if (lineBuffer.trim()) {
+          handleStreamLine(lineBuffer);
+          lineBuffer = '';
+        }
+
+        if (code !== 0 && !finalResult && !streamedText.trim()) {
           return reject(new Error(`agy exited with code ${code}: ${stderr || stdout}`));
         }
 
+        if (finalResult) {
+          const combinedIn = totalInputTokens || finalResult.usage?.input_tokens || 0;
+          const combinedOut = totalOutputTokens || finalResult.usage?.output_tokens || 0;
+          resolve({
+            conversation_id: finalResult.conversation_id || resolvedConversationId,
+            status: finalResult.status || 'SUCCESS',
+            response: finalResult.response || streamedText,
+            usage: {
+              input_tokens: combinedIn,
+              output_tokens: combinedOut,
+              total_tokens: combinedIn + combinedOut || finalResult.usage?.total_tokens || 0,
+            },
+            native_tool_calls_count: nativeToolCallsCount,
+            native_turns_count: nativeTurnsCount,
+          });
+          return;
+        }
+
+        if (streamedText.trim()) {
+          resolve({
+            conversation_id: resolvedConversationId,
+            status: 'SUCCESS',
+            response: streamedText,
+            usage: {
+              input_tokens: totalInputTokens,
+              output_tokens: totalOutputTokens,
+              total_tokens: totalInputTokens + totalOutputTokens,
+            },
+            native_tool_calls_count: nativeToolCallsCount,
+            native_turns_count: nativeTurnsCount,
+          });
+          return;
+        }
+
         try {
-          // stdout may contain prompt echoing or profile loading before JSON, find first '{'
           const firstBrace = stdout.indexOf('{');
           if (firstBrace === -1) {
             return reject(new Error(`Failed to parse agy JSON output: ${stdout}`));
@@ -346,7 +578,8 @@ export class AgyProvider implements LLMProvider {
       });
 
       proc.on('error', (err) => {
-        clearTimeout(timer);
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        clearTimeout(maxTimer);
         reject(err);
       });
     });

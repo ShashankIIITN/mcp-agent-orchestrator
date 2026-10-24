@@ -833,6 +833,45 @@ export function renderDashboardHtml(): string {
           </div>
         </div>
 
+        <!-- Real-Time Live Execution Stream & Activity Console -->
+        <div class="card" id="sessLiveStreamCard" style="border-color: rgba(56, 189, 248, 0.35); background: rgba(15, 23, 42, 0.92);">
+          <div class="card-header" style="margin-bottom: 0.5rem;">
+            <div class="card-title">
+              <span>📡 Real-Time Execution Status &amp; Activity Log</span>
+              <span id="sessLivePulseBadge" class="badge badge-running" style="margin-left: 0.4rem;">Live Stream</span>
+            </div>
+            <button type="button" class="btn btn-outline" style="padding: 3px 8px; font-size: 0.72rem;" onclick="clearSessionLiveLog()">Clear Log</button>
+          </div>
+          <div id="sessLiveStatusText" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--primary); padding: 0.55rem 0.75rem; background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 6px; margin-bottom: 0.6rem;">
+            Standing by for live events...
+          </div>
+          <div id="sessLiveLogFeed" style="font-family: var(--font-mono); font-size: 0.75rem; color: var(--text-secondary); background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 6px; padding: 0.65rem 0.8rem; max-height: 185px; overflow-y: auto; display: flex; flex-direction: column; gap: 0.3rem;"></div>
+        </div>
+
+        <!-- Prominent Latest Session Output / Deliverable Card -->
+        <div class="card" id="sessOutputCard">
+          <div class="card-header">
+            <div class="card-title">
+              <span>✨ Session Output / Latest Deliverable</span>
+              <span id="sessOutputStateBadge" class="badge badge-completed" style="margin-left: 0.4rem;">Output</span>
+            </div>
+            <div style="display: flex; gap: 0.45rem;" id="sessOutputActions">
+              <button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Output</button>
+            </div>
+          </div>
+          <div id="sessOutputQuickStart" style="display: none; padding: 0.85rem; background: var(--bg-root); border: 1px dashed var(--border-focus); border-radius: 8px; margin-bottom: 0.5rem;">
+            <div style="font-size: 0.83rem; color: var(--text-secondary); margin-bottom: 0.6rem;">
+              This isolated session was initialized without an initial task. Click a 1-click task below or send a custom prompt in the composer to execute its first turn:
+            </div>
+            <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+              <button type="button" class="btn btn-primary" onclick="triggerQuickPrompt('Review the mcp-agent-orchestrator codebase architecture, edge cases, and security guards, and return a concise prioritized report.')">🔍 Review Codebase &amp; Security</button>
+              <button type="button" class="btn btn-outline" onclick="triggerQuickPrompt('Scan src/ and return a concise architectural map of entrypoints, providers, and key modules.')">🗺️ Map Architecture</button>
+              <button type="button" class="btn btn-outline" onclick="triggerQuickPrompt('Inspect tests/ and summarize test coverage and any untested edge cases.')">🧪 Audit Test Suite</button>
+            </div>
+          </div>
+          <pre id="sessOutputContent" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1rem; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); font-size: 0.86rem; line-height: 1.6; max-height: 440px; overflow-y: auto; color: var(--text);">No output generated yet.</pre>
+        </div>
+
         <!-- Conversation Transcript & Live Turn Composer -->
         <div class="card">
           <div class="card-header">
@@ -1026,7 +1065,7 @@ export function renderDashboardHtml(): string {
       <button type="button" class="btn btn-outline" onclick="document.getElementById('spawnSessionDialog').close()">✕</button>
     </div>
     <p style="font-size: 0.8rem; color: var(--text-secondary);">
-      Launch a specialist in its own separate context window with custom model tiering.
+      Launch a specialist in its own separate context window with custom model tiering and real-time SSE streaming.
     </p>
     <form onsubmit="submitSpawnSession(event)">
       <div class="form-grid">
@@ -1044,22 +1083,27 @@ export function renderDashboardHtml(): string {
             <option value="heavy">🧠 Heavy (claude-sonnet-4-6 / Frontier)</option>
           </select>
         </div>
+        <div class="form-field full">
+          <label for="spawnTask">Initial Task / Prompt (<code>initial_message</code>) *</label>
+          <div style="display: flex; gap: 0.35rem; flex-wrap: wrap; margin-bottom: 0.35rem;">
+            <button type="button" class="filter-pill" onclick="document.getElementById('spawnTask').value='Review the mcp-agent-orchestrator codebase architecture, edge cases, and security guards, and return a concise prioritized report.'">🔍 Code &amp; Security Review</button>
+            <button type="button" class="filter-pill" onclick="document.getElementById('spawnTask').value='Scan src/ and return a concise architectural map of entrypoints, providers, and key modules.'">🗺️ Architecture Map</button>
+            <button type="button" class="filter-pill" onclick="document.getElementById('spawnTask').value='Inspect tests/ and summarize existing test suites and any untested edge cases.'">🧪 Test Coverage Audit</button>
+          </div>
+          <textarea id="spawnTask" class="form-textarea" placeholder="Describe what this isolated session should analyze, review, or build..." required></textarea>
+        </div>
         <div class="form-field">
           <label for="spawnName">Session Name (optional)</label>
-          <input type="text" id="spawnName" class="form-input" placeholder="e.g. SecurityScout" />
+          <input type="text" id="spawnName" class="form-input" placeholder="Auto-generated from preset if blank" />
         </div>
         <div class="form-field">
           <label for="spawnWorkspace">Workspace Path</label>
           <input type="text" id="spawnWorkspace" class="form-input" value="./" />
         </div>
-        <div class="form-field full">
-          <label for="spawnTask">Initial Task / Prompt (<code>initial_message</code>)</label>
-          <textarea id="spawnTask" class="form-textarea" placeholder="Describe what this isolated session should analyze or build..."></textarea>
-        </div>
       </div>
       <div style="display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 1.25rem;">
         <button type="button" class="btn btn-outline" onclick="document.getElementById('spawnSessionDialog').close()">Cancel</button>
-        <button type="submit" class="btn btn-primary" id="spawnSubmitBtn">🚀 Launch Isolated Session</button>
+        <button type="submit" class="btn btn-primary" id="spawnSubmitBtn">🚀 Launch &amp; Stream Live</button>
       </div>
     </form>
   </dialog>
@@ -1115,11 +1159,30 @@ export function renderDashboardHtml(): string {
     let selectedSessionId = null;
     let sessionFilter = 'all';
 
+    // Real-time SSE activity logs and live streaming text per session
+    const sessionLiveLogs = {};
+    const sessionLiveStreams = {};
+    const sessionLiveStatus = {};
+
     let jobs = [];
     let selectedJobId = null;
     let jobFilter = 'all';
 
     let appConfig = null;
+
+    function formatSessionStatusLabel(status, iterations) {
+      if (status === 'running') return '⚡ running';
+      if (status === 'error') return '❌ error';
+      if (status === 'paused') return '⏸ paused';
+      if (status === 'terminated') return '✕ terminated';
+      if (status === 'idle' && (iterations || 0) > 0) return '✓ done • ready';
+      return '○ standby';
+    }
+
+    function formatSessionBadgeClass(status, iterations) {
+      if (status === 'idle' && (iterations || 0) > 0) return 'badge-completed';
+      return 'badge-' + (status || 'idle');
+    }
 
     function escapeHtml(text) {
       return String(text === null || text === undefined ? '' : text)
@@ -1252,6 +1315,8 @@ export function renderDashboardHtml(): string {
         const depth = Math.min(3, s.depth || 0);
         const tier = s.tier || 'balanced';
         const usedTok = s.context_tokens_used || 0;
+        const badgeCls = formatSessionBadgeClass(s.status, s.iterations);
+        const badgeLabel = formatSessionStatusLabel(s.status, s.iterations);
         return \`
           <div class="item-card depth-\${depth} \${s.id === selectedSessionId ? 'active' : ''}" onclick="selectSession('\${escapeHtml(s.id)}')">
             <div class="item-top">
@@ -1259,7 +1324,7 @@ export function renderDashboardHtml(): string {
                 \${depth > 0 ? '<span style="color: var(--primary);">↳</span>' : ''}
                 <span>\${escapeHtml(s.name)}</span>
               </div>
-              <span class="badge badge-\${escapeHtml(s.status)}">\${escapeHtml(s.status)}</span>
+              <span class="badge \${escapeHtml(badgeCls)}">\${escapeHtml(badgeLabel)}</span>
             </div>
             <div class="item-role" title="\${escapeHtml(s.role)}">\${escapeHtml(s.role)}</div>
             <div class="item-meta">
@@ -1267,7 +1332,7 @@ export function renderDashboardHtml(): string {
                 <span class="badge tier-\${escapeHtml(tier)}">\${escapeHtml(tier)}</span>
                 <span>\${escapeHtml(s.model)}</span>
               </span>
-              <span>\${formatNumber(usedTok)} tok • \${s.iterations || 0}t</span>
+              <span>\${formatNumber(usedTok)} tok • \${s.iterations || 0}t • \${s.total_tool_calls || 0}🔧</span>
             </div>
           </div>
         \`;
@@ -1280,6 +1345,71 @@ export function renderDashboardHtml(): string {
       document.getElementById('sessionEmptyState').style.display = 'none';
       document.getElementById('sessionDetailPane').style.display = 'flex';
       await fetchSessionDetail(id);
+    }
+
+    function clearSessionLiveLog() {
+      if (!selectedSessionId) return;
+      sessionLiveLogs[selectedSessionId] = [];
+      renderSessionLiveConsole(selectedSessionId, null, []);
+    }
+
+    function renderSessionLiveConsole(id, sess, messages) {
+      const statusTextEl = document.getElementById('sessLiveStatusText');
+      const logFeedEl = document.getElementById('sessLiveLogFeed');
+      const pulseBadge = document.getElementById('sessLivePulseBadge');
+
+      const liveStatus = sessionLiveStatus[id];
+      const liveLogs = sessionLiveLogs[id] || [];
+
+      if (sess?.status === 'running') {
+        pulseBadge.className = 'badge badge-running';
+        pulseBadge.innerText = '⚡ Streaming Live';
+        statusTextEl.innerText = liveStatus || \`⚡ Executing turn in isolated context window (\${sess.model})...\`;
+      } else if (sess?.status === 'error') {
+        pulseBadge.className = 'badge badge-error';
+        pulseBadge.innerText = '❌ Error';
+        statusTextEl.innerText = liveStatus || sess.last_error || '❌ Last turn ended with an error.';
+      } else if ((sess?.iterations || 0) > 0) {
+        pulseBadge.className = 'badge badge-completed';
+        pulseBadge.innerText = '✓ Turn Complete';
+        statusTextEl.innerText = liveStatus || \`✓ Turn completed (\${sess.iterations || 0} iterations, \${sess.total_tool_calls || 0} tool invocations).\`;
+      } else {
+        pulseBadge.className = 'badge badge-queued';
+        pulseBadge.innerText = '○ Standby';
+        statusTextEl.innerText = '○ Session initialized and standing by for instructions.';
+      }
+
+      // Combine live SSE events with persisted tool messages so historical sessions also show their step log
+      let combinedEntries = [...liveLogs];
+      if (combinedEntries.length === 0 && Array.isArray(messages) && messages.length > 0) {
+        combinedEntries = messages.map((m) => {
+          const t = new Date(m.timestamp || Date.now()).toLocaleTimeString();
+          if (m.role === 'user') return \`[\${t}] 👤 User Task: \${(m.content || '').slice(0, 140)}\`;
+          if (m.role === 'tool') return \`[\${t}] 🔧 \${(m.content || '').split('\\n')[0].slice(0, 140)}\`;
+          if (m.role === 'assistant') {
+            const isErr = (m.content || '').startsWith('Error invoking');
+            return \`[\${t}] \${isErr ? '❌' : '✨'} Assistant \${isErr ? 'Error' : 'Deliverable'}: \${(m.content || '').slice(0, 140)}...\`;
+          }
+          return \`[\${t}] \${m.role}: \${(m.content || '').slice(0, 120)}\`;
+        });
+      }
+
+      if (combinedEntries.length === 0) {
+        logFeedEl.innerHTML = '<div style="color: var(--text-muted);">No execution steps logged yet. Launch or send a turn to watch real-time tool calls and token streaming.</div>';
+      } else {
+        logFeedEl.innerHTML = combinedEntries
+          .slice(-40)
+          .map((line) => \`<div>\${escapeHtml(line)}</div>\`)
+          .join('');
+        logFeedEl.scrollTop = logFeedEl.scrollHeight;
+      }
+    }
+
+    async function triggerQuickPrompt(promptText) {
+      if (!selectedSessionId || !promptText) return;
+      const input = document.getElementById('sessFollowUpInput');
+      input.value = promptText;
+      await sendFollowUpMessage(new Event('submit'));
     }
 
     async function fetchSessionDetail(id) {
@@ -1299,8 +1429,8 @@ export function renderDashboardHtml(): string {
         document.getElementById('sessHeaderRole').innerText = sess.role;
 
         const statusBadge = document.getElementById('sessHeaderStatus');
-        statusBadge.className = 'badge badge-' + sess.status;
-        statusBadge.innerText = sess.status;
+        statusBadge.className = 'badge ' + formatSessionBadgeClass(sess.status, sess.iterations);
+        statusBadge.innerText = formatSessionStatusLabel(sess.status, sess.iterations);
 
         const tierBadge = document.getElementById('sessHeaderTier');
         tierBadge.className = 'badge tier-' + tier;
@@ -1341,8 +1471,62 @@ export function renderDashboardHtml(): string {
           \`;
         }
 
-        // Transcript
         const messages = data.messages || [];
+        renderSessionLiveConsole(id, sess, messages);
+
+        // Prominent Session Output / Latest Deliverable Card
+        const assistantMsgs = messages.filter((m) => m.role === 'assistant');
+        const userMsgs = messages.filter((m) => m.role === 'user');
+        const latestAssistant = assistantMsgs[assistantMsgs.length - 1];
+        const firstUserPrompt = userMsgs[0]?.content || 'Review the mcp-agent-orchestrator codebase architecture, edge cases, and security guards.';
+        const liveStreamText = sessionLiveStreams[id];
+
+        const outContentEl = document.getElementById('sessOutputContent');
+        const outBadgeEl = document.getElementById('sessOutputStateBadge');
+        const outQuickStartEl = document.getElementById('sessOutputQuickStart');
+        const outActionsEl = document.getElementById('sessOutputActions');
+
+        if (sess.status === 'running') {
+          outQuickStartEl.style.display = 'none';
+          outBadgeEl.className = 'badge badge-running';
+          outBadgeEl.innerText = '⚡ Streaming Live...';
+          outContentEl.style.borderColor = 'rgba(56, 189, 248, 0.45)';
+          outContentEl.innerText =
+            liveStreamText ||
+            (latestAssistant ? latestAssistant.content : '⏳ Specialist is inspecting workspace files and running tools in its isolated context window. Output will stream here live...');
+          outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Output</button>\`;
+        } else if (latestAssistant) {
+          outQuickStartEl.style.display = 'none';
+          const isErrOutput =
+            sess.status === 'error' ||
+            (latestAssistant.content || '').startsWith('Error invoking') ||
+            (latestAssistant.content || '').startsWith('Error:');
+          if (isErrOutput) {
+            outBadgeEl.className = 'badge badge-error';
+            outBadgeEl.innerText = '❌ Execution Error';
+            outContentEl.style.borderColor = 'rgba(248, 113, 113, 0.5)';
+            outContentEl.innerText = latestAssistant.content;
+            outActionsEl.innerHTML = \`
+              <button type="button" class="btn btn-primary" onclick="triggerQuickPrompt(\${JSON.stringify(firstUserPrompt).replace(/"/g, '&quot;')})">↻ Retry Original Task</button>
+              <button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy</button>
+            \`;
+          } else {
+            outBadgeEl.className = 'badge badge-completed';
+            outBadgeEl.innerText = '✓ Completed Deliverable';
+            outContentEl.style.borderColor = 'rgba(52, 211, 153, 0.4)';
+            outContentEl.innerText = latestAssistant.content;
+            outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Output</button>\`;
+          }
+        } else {
+          outQuickStartEl.style.display = 'block';
+          outBadgeEl.className = 'badge badge-queued';
+          outBadgeEl.innerText = '○ Awaiting First Task';
+          outContentEl.style.borderColor = 'var(--border-light)';
+          outContentEl.innerText = 'No deliverable yet — click one of the quick-start tasks above or type an instruction below.';
+          outActionsEl.innerHTML = '';
+        }
+
+        // Transcript
         document.getElementById('sessMsgCountLabel').innerText = messages.length + ' messages';
         const feed = document.getElementById('sessTranscriptFeed');
         if (messages.length === 0) {
@@ -1351,7 +1535,7 @@ export function renderDashboardHtml(): string {
           feed.innerHTML = messages.map((m) => \`
             <div class="msg-bubble \${escapeHtml(m.role)}">
               <div class="msg-meta">
-                <strong>\${escapeHtml(m.role.toUpperCase())}</strong>
+                <strong>\${escapeHtml(m.role === 'tool' ? '🔧 TOOL EXECUTION' : m.role.toUpperCase())}</strong>
                 <span>\${formatRelativeTime(m.timestamp)}</span>
               </div>
               <div class="msg-body">\${escapeHtml(m.content)}</div>
@@ -1400,7 +1584,7 @@ export function renderDashboardHtml(): string {
     }
 
     async function sendFollowUpMessage(event) {
-      event.preventDefault();
+      if (event && event.preventDefault) event.preventDefault();
       if (!selectedSessionId) return;
       const input = document.getElementById('sessFollowUpInput');
       const btn = document.getElementById('sessSendBtn');
@@ -1409,13 +1593,16 @@ export function renderDashboardHtml(): string {
 
       input.value = '';
       btn.disabled = true;
-      btn.innerText = 'Running Turn...';
+      btn.innerText = 'Dispatching...';
+      sessionLiveStreams[selectedSessionId] = '';
+      sessionLiveStatus[selectedSessionId] = '🚀 Dispatching turn to isolated session...';
 
       try {
+        // Dispatch asynchronously (await_response: false) so the UI streams live events via SSE immediately!
         await fetch(\`/api/sessions/\${encodeURIComponent(selectedSessionId)}/message\`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content, await_response: true }),
+          body: JSON.stringify({ content, await_response: false }),
         });
         await refreshAll();
       } catch (err) {
@@ -1761,12 +1948,96 @@ export function renderDashboardHtml(): string {
       sseBadge.innerText = '○ Reconnecting...';
     };
 
+    let sseRefreshTimer = null;
+    function scheduleDebouncedRefresh(delayMs = 350) {
+      if (sseRefreshTimer) return;
+      sseRefreshTimer = setTimeout(async () => {
+        sseRefreshTimer = null;
+        await refreshAll();
+      }, delayMs);
+    }
+
     sse.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data);
-        if (ev.type && ev.type !== 'connected') {
-          refreshAll();
+        if (!ev.type || ev.type === 'connected') return;
+
+        if (ev.type === 'session_stream') {
+          const sid = ev.data?.sessionId || ev.jobId;
+          if (!sid) return;
+
+          const timeStr = new Date(ev.timestamp || Date.now()).toLocaleTimeString();
+          const statusText = ev.data?.statusText || ev.data?.stepType || 'Active step';
+          sessionLiveStatus[sid] = statusText;
+
+          if (!sessionLiveLogs[sid]) sessionLiveLogs[sid] = [];
+          // Avoid spamming duplicate consecutive text_delta log lines; log start of streaming or non-delta steps
+          if (ev.data?.stepType !== 'text_delta') {
+            sessionLiveLogs[sid].push(\`[\${timeStr}] \${statusText}\`);
+            if (sessionLiveLogs[sid].length > 80) sessionLiveLogs[sid].shift();
+          }
+
+          if (typeof ev.data?.accumulatedText === 'string' && ev.data.accumulatedText.length > 0) {
+            sessionLiveStreams[sid] = ev.data.accumulatedText;
+          }
+
+          // Update in-memory session list item immediately
+          const sessItem = sessions.find((s) => s.id === sid);
+          if (sessItem) {
+            if (ev.data?.stepType === 'turn_complete') {
+              sessItem.status = 'idle';
+            } else if (ev.data?.stepType === 'error') {
+              sessItem.status = 'error';
+            } else {
+              sessItem.status = 'running';
+            }
+            if (typeof ev.data?.iterations === 'number') sessItem.iterations = ev.data.iterations;
+            if (typeof ev.data?.totalToolCalls === 'number') sessItem.total_tool_calls = ev.data.totalToolCalls;
+            if (typeof ev.data?.contextTokensUsed === 'number') sessItem.context_tokens_used = ev.data.contextTokensUsed;
+            renderSessionList();
+          }
+
+          // If this session is currently selected in the inspector, update DOM instantaneously (<16ms)
+          if (selectedSessionId === sid) {
+            document.getElementById('sessLiveStatusText').innerText = statusText;
+            const logFeedEl = document.getElementById('sessLiveLogFeed');
+            logFeedEl.innerHTML = sessionLiveLogs[sid]
+              .slice(-40)
+              .map((line) => \`<div>\${escapeHtml(line)}</div>\`)
+              .join('');
+            logFeedEl.scrollTop = logFeedEl.scrollHeight;
+
+            if (typeof ev.data?.iterations === 'number') {
+              document.getElementById('sessMetricIterations').innerText = formatNumber(ev.data.iterations);
+            }
+            if (typeof ev.data?.totalToolCalls === 'number') {
+              document.getElementById('sessMetricTools').innerText = formatNumber(ev.data.totalToolCalls);
+            }
+            if (typeof ev.data?.contextTokensUsed === 'number' && ev.data.contextTokensUsed > 0) {
+              document.getElementById('sessMetricUsed').innerText = formatNumber(ev.data.contextTokensUsed);
+            }
+
+            if (typeof ev.data?.accumulatedText === 'string' && ev.data.accumulatedText.length > 0) {
+              document.getElementById('sessOutputQuickStart').style.display = 'none';
+              document.getElementById('sessOutputContent').innerText = ev.data.accumulatedText;
+              const outBadgeEl = document.getElementById('sessOutputStateBadge');
+              if (ev.data?.stepType === 'turn_complete') {
+                outBadgeEl.className = 'badge badge-completed';
+                outBadgeEl.innerText = '✓ Completed Deliverable';
+              } else {
+                outBadgeEl.className = 'badge badge-running';
+                outBadgeEl.innerText = '⚡ Streaming Live...';
+              }
+            }
+          }
+
+          if (ev.data?.stepType === 'turn_complete' || ev.data?.stepType === 'error' || ev.data?.stepType === 'tool_done') {
+            scheduleDebouncedRefresh(200);
+          }
+          return;
         }
+
+        scheduleDebouncedRefresh(200);
       } catch {}
     };
 

@@ -28,6 +28,29 @@ export interface ToolCall {
 }
 
 /**
+ * Live streaming progress event emitted by providers (such as `agy --output-format stream-json`).
+ */
+export interface CompletionProgressEvent {
+  type: 'init' | 'thinking' | 'tool_start' | 'tool_done' | 'text_delta' | 'step_done';
+  stepIndex?: number;
+  model?: string;
+  conversationId?: string;
+  toolName?: string;
+  toolArgs?: Record<string, unknown>;
+  toolOutput?: string;
+  textDelta?: string;
+  accumulatedText?: string;
+  durationSeconds?: number;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    thinking_tokens?: number;
+    cache_read_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
+/**
  * Options for a completion request.
  */
 export interface CompletionOptions {
@@ -40,6 +63,8 @@ export interface CompletionOptions {
   sessionId?: string;
   /** Optional workspace path to mount into CLI providers (e.g. agy --add-dir). */
   workspacePath?: string;
+  /** Optional callback for real-time streaming progress events (tool executions, text deltas, token usage). */
+  onProgress?: (event: CompletionProgressEvent) => void;
 }
 
 /**
@@ -54,6 +79,10 @@ export interface CompletionResponse {
     completion_tokens: number;
     total_tokens: number;
   };
+  /** Count of native CLI tool calls executed internally during this turn (e.g. by agy). */
+  native_tool_calls_count?: number;
+  /** Count of internal reasoning/tool steps executed during this turn. */
+  native_turns_count?: number;
 }
 
 /**

@@ -29,9 +29,17 @@ export function resolveCrossPlatformPath(targetPath: string, basePath?: string):
     if (existsSync(resolved)) {
       return realpathSync(resolved);
     }
-    const parentDir = path.dirname(resolved);
-    if (existsSync(parentDir)) {
-      return path.join(realpathSync(parentDir), path.basename(resolved));
+    // Walk up to the nearest existing ancestor directory so nested non-existent paths under symlinks resolve accurately
+    let current = resolved;
+    const tailSegments: string[] = [];
+    while (true) {
+      const parentDir = path.dirname(current);
+      tailSegments.unshift(path.basename(current));
+      if (parentDir === current) break;
+      if (existsSync(parentDir)) {
+        return path.join(realpathSync(parentDir), ...tailSegments);
+      }
+      current = parentDir;
     }
   } catch {
     // Fallback to lexical resolution if realpath fails due to permissions

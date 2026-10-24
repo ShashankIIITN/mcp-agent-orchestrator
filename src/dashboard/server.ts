@@ -275,8 +275,17 @@ export class DashboardServer {
       }
       try {
         const body = await this.readJsonBody(req);
+        const rawName = typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined;
+        let initialMsg =
+          typeof body.initial_message === 'string' && body.initial_message.trim()
+            ? body.initial_message.trim()
+            : undefined;
+        // If user typed a multi-word task phrase into the Name field and left Initial Task blank, run it as the task
+        if (!initialMsg && rawName && rawName.includes(' ')) {
+          initialMsg = rawName;
+        }
         const result = await this.sessionManager.invokeSession({
-          name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined,
+          name: rawName,
           role: typeof body.role === 'string' && body.role.trim() ? body.role.trim() : undefined,
           system_prompt:
             typeof body.system_prompt === 'string' && body.system_prompt.trim()
@@ -299,10 +308,7 @@ export class DashboardServer {
             typeof body.workspace_path === 'string' && body.workspace_path.trim()
               ? body.workspace_path.trim()
               : './',
-          initial_message:
-            typeof body.initial_message === 'string' && body.initial_message.trim()
-              ? body.initial_message.trim()
-              : undefined,
+          initial_message: initialMsg,
           await_response: Boolean(body.await_response),
           parent_session_id:
             typeof body.parent_session_id === 'string' && body.parent_session_id.trim()
