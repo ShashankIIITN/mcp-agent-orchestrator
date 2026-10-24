@@ -129,6 +129,8 @@ export class AgentRuntime {
           model: this.config.model,
           sessionId: this.config.id,
           workspacePath: context.workspace_path,
+          safetyMode: context.safety_mode,
+          allowedToolNames: this.config.tools.map((t) => t.name),
           onProgress: (ev: CompletionProgressEvent) => {
             if (ev.type === 'init') {
               eventBus.emitJobEvent('session_stream', streamTargetId, {

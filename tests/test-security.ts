@@ -11,6 +11,10 @@ import { SqliteStorageAdapter } from '../src/storage/sqlite-adapter.js';
 import { AgentPool } from '../src/agents/agent-pool.js';
 import { PipelineRunner } from '../src/orchestrator/pipeline-runner.js';
 import { AnthropicProvider } from '../src/inference/providers/anthropic-provider.js';
+import { AgyProvider } from '../src/inference/providers/agy-provider.js';
+import { ProviderRegistry } from '../src/inference/provider-registry.js';
+import { BuiltinToolRegistry } from '../src/builtin-tools/tool-registry.js';
+import { SessionManager } from '../src/sessions/session-manager.js';
 import { loadConfig } from '../src/config/loader.js';
 import type { LLMProvider } from '../src/inference/types.js';
 
@@ -167,6 +171,73 @@ assert.strictEqual(out.finish_reason, 'tool_calls');
 assert.strictEqual(out.tool_calls?.[0].name, 'fs_read');
 assert.strictEqual(out.usage?.total_tokens, 7);
 console.log('5️⃣ Anthropic native provider ✅');
+
+// 6. AgyProvider native tool policy enforcement (safetyMode, allowedToolNames, dangerous commands, workspace confinement)
+const agyProv = new AgyProvider('agy');
+assert.match(
+  agyProv.validateNativeToolExecution('write_to_file', { Path: 'a.txt' }, { safetyMode: 'safe' }) ?? '',
+  /blocked in safe mode/,
+);
+assert.match(
+  agyProv.validateNativeToolExecution('run_command', { CommandLine: 'echo hi' }, { safetyMode: 'safe' }) ?? '',
+  /blocked in safe mode/,
+);
+assert.match(
+  agyProv.validateNativeToolExecution('write_to_file', { Path: 'a.txt' }, { safetyMode: 'semi-autonomous', allowedToolNames: ['fs_read', 'fs_list'] }) ?? '',
+  /not permitted by session allowed_tools/,
+);
+assert.match(
+  agyProv.validateNativeToolExecution('run_command', { CommandLine: 'rm -rf /' }, { safetyMode: 'semi-autonomous', allowedToolNames: ['shell_exec'] }) ?? '',
+  /dangerous command guard/,
+);
+assert.match(
+  agyProv.validateNativeToolExecution('read_file', { Path: '../outside-secret.txt' }, { workspacePath: process.cwd() }) ?? '',
+  /escapes confined workspace/,
+);
+assert.strictEqual(
+  agyProv.validateNativeToolExecution('read_file', { Path: 'package.json' }, { workspacePath: process.cwd(), safetyMode: 'safe', allowedToolNames: ['fs_read'] }),
+  undefined,
+);
+console.log('6️⃣ AgyProvider native tool policy & workspace confinement ✅');
+
+// 7. Cross-provider tier model compatibility & strict explicit provider validation
+const customReg = new ProviderRegistry();
+customReg.register('anthropic', anth);
+const customConfig = {
+  ...config,
+  inference: {
+    providers: {
+      anthropic: { type: 'anthropic' as const, model: 'claude-sonnet-4-6' },
+    },
+  },
+};
+const sm = new SessionManager(storage, customReg, new BuiltinToolRegistry(), customConfig as any);
+const fastResolved = sm.resolveProviderAndModel({ tier: 'fast' });
+assert.strictEqual(fastResolved.providerKey, 'anthropic');
+assert.strictEqual(fastResolved.effectiveModel, 'claude-haiku-4-5', 'fast tier fallback to anthropic must use a Claude model, not Gemini');
+assert.throws(
+  () => sm.resolveProviderAndModel({ provider: 'nonexistent_provider', tier: 'fast' }),
+  /Provider not found: nonexistent_provider/,
+  'invalid explicit provider must be rejected even when tier is specified',
+);
+console.log('7️⃣ Cross-provider tier compatibility & provider validation ✅');
+
+// 8. Bounded LRU eviction & session cleanup (AgyProvider.sessionConversations & SessionManager.activeSessions)
+for (let i = 0; i < 250; i++) {
+  (agyProv as any).setTrackedConversation(`sess-${i}`, `conv-${i}`);
+}
+assert.strictEqual(agyProv.getTrackedConversationCount(), 200, 'sessionConversations must be bounded at 200 entries');
+agyProv.clearSessionState('sess-249');
+assert.strictEqual(agyProv.getTrackedConversationCount(), 199);
+
+for (let i = 0; i < 12; i++) {
+  await sm.invokeSession({ name: `idle-${i}`, provider: 'anthropic', await_response: false });
+}
+assert.strictEqual(sm.getActiveInMemorySessionCount(), 12);
+const evictedCount = sm.pruneInactiveSessions(5, 60000);
+assert.strictEqual(evictedCount, 7, 'pruneInactiveSessions must evict excess idle sessions');
+assert.strictEqual(sm.getActiveInMemorySessionCount(), 5);
+console.log('8️⃣ Bounded LRU state & idle session eviction ✅');
 
 await storage.close();
 console.log('\n🎉 SECURITY HARDENING TESTS PASSED\n');

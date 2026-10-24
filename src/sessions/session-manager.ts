@@ -72,9 +72,12 @@ interface ActiveSessionContainer {
   depth: number;
   queue: QueuedTurn[];
   isProcessingQueue: boolean;
+  lastAccessedAt: number;
 }
 
 export class SessionManager {
+  private static readonly MAX_ACTIVE_IDLE_SESSIONS = 100;
+  private static readonly IDLE_SESSION_TTL_MS = 30 * 60 * 1000;
   private activeSessions = new Map<string, ActiveSessionContainer>();
   private policyEngine: PolicyEngine;
 
@@ -85,6 +88,42 @@ export class SessionManager {
     private config: OrchestratorConfig,
   ) {
     this.policyEngine = new PolicyEngine(config.server.security);
+  }
+
+  /**
+   * Select a default model that is guaranteed to be compatible with `providerKey` and `tier`.
+   */
+  private getDefaultModelForProviderAndTier(providerKey: string, tier: ModelTier): string {
+    const providerCfg = this.config.inference.providers[providerKey];
+    const providerType = (providerCfg?.type ?? providerKey).toLowerCase();
+    const keyLower = providerKey.toLowerCase();
+
+    if (providerType === 'anthropic' || keyLower.includes('claude') || keyLower === 'anthropic') {
+      if (tier === 'fast') return 'claude-haiku-4-5';
+      return providerCfg?.model || 'claude-sonnet-4-6';
+    }
+
+    if (providerType === 'openai' || keyLower === 'openai') {
+      if (tier === 'fast') return 'gpt-4o-mini';
+      return providerCfg?.model || 'gpt-4o';
+    }
+
+    if (providerType === 'ollama' || keyLower === 'ollama') {
+      return providerCfg?.model || 'llama3.3';
+    }
+
+    if (providerType === 'gemini' || keyLower === 'gemini') {
+      if (tier === 'heavy') return 'gemini-2.5-pro';
+      return providerCfg?.model || 'gemini-2.5-flash';
+    }
+
+    if (providerType === 'agy' || keyLower.startsWith('agy')) {
+      if (tier === 'fast') return 'gemini-3.8-flash-low';
+      if (tier === 'heavy') return 'gemini-3.1-pro-high';
+      return providerCfg?.model || 'gemini-3.8-flash-high';
+    }
+
+    return providerCfg?.model || 'default';
   }
 
   /**
@@ -104,6 +143,11 @@ export class SessionManager {
       throw new Error('No inference providers configured in orchestrator');
     }
 
+    // Validate explicit provider override up-front so invalid provider names are never silently ignored
+    if (params.provider) {
+      this.providerRegistry.getOrThrow(params.provider);
+    }
+
     const findProvider = (...candidates: (string | undefined)[]): string | undefined => {
       for (const c of candidates) {
         if (c && this.providerRegistry.get(c)) return c;
@@ -116,23 +160,23 @@ export class SessionManager {
     // 1. If a tier is explicitly requested and model is not overridden, check tier mappings
     if (params.tier && !params.model) {
       const configuredTier = this.config.inference.tiers?.[params.tier];
-      const tierProvider = findProvider(params.provider, configuredTier?.provider);
-      if (configuredTier && tierProvider) {
-        return {
-          providerKey: tierProvider,
-          effectiveModel: configuredTier.model,
-          effectiveTier,
-        };
+      if (!params.provider && configuredTier) {
+        const tierProvider = findProvider(configuredTier.provider);
+        if (tierProvider) {
+          return {
+            providerKey: tierProvider,
+            effectiveModel: configuredTier.model,
+            effectiveTier,
+          };
+        }
       }
 
       if (params.tier === 'fast') {
         const fastProvider = findProvider(params.provider, 'ollama', 'gemini', 'agy', providerNames[0])!;
         const fastModel =
-          fastProvider === 'ollama'
-            ? this.config.inference.providers[fastProvider]?.model || 'llama3.3'
-            : fastProvider === 'gemini'
-              ? 'gemini-2.5-flash'
-              : 'gemini-3.8-flash-lite';
+          params.provider && configuredTier?.provider === params.provider
+            ? configuredTier.model
+            : this.getDefaultModelForProviderAndTier(fastProvider, 'fast');
         return { providerKey: fastProvider, effectiveModel: fastModel, effectiveTier: 'fast' };
       }
 
@@ -146,18 +190,18 @@ export class SessionManager {
           providerNames[0],
         )!;
         const heavyModel =
-          heavyProvider === 'agy_claude' || heavyProvider === 'anthropic'
-            ? 'claude-sonnet-4-6'
-            : heavyProvider === 'openai'
-              ? 'gpt-4o'
-              : 'gemini-3.1-pro-high';
+          params.provider && configuredTier?.provider === params.provider
+            ? configuredTier.model
+            : this.getDefaultModelForProviderAndTier(heavyProvider, 'heavy');
         return { providerKey: heavyProvider, effectiveModel: heavyModel, effectiveTier: 'heavy' };
       }
 
       // 'balanced' tier
       const balancedProvider = findProvider(params.provider, 'agy', 'gemini', 'openai', providerNames[0])!;
       const balancedModel =
-        this.config.inference.providers[balancedProvider]?.model || 'gemini-3.8-flash-high';
+        params.provider && configuredTier?.provider === params.provider
+          ? configuredTier.model
+          : this.getDefaultModelForProviderAndTier(balancedProvider, 'balanced');
       return { providerKey: balancedProvider, effectiveModel: balancedModel, effectiveTier: 'balanced' };
     }
 
@@ -178,10 +222,6 @@ export class SessionManager {
     }
 
     if (!providerKey) {
-      if (params.provider) {
-        // Let getOrThrow produce a clear error for an unknown explicit provider
-        this.providerRegistry.getOrThrow(params.provider);
-      }
       providerKey = providerNames[0];
     }
 
@@ -325,9 +365,11 @@ export class SessionManager {
       depth,
       queue: [],
       isProcessingQueue: false,
+      lastAccessedAt: Date.now(),
     };
 
     this.activeSessions.set(sessionId, container);
+    this.pruneInactiveSessions();
     logger.info(
       { sessionId, name, role, provider: providerKey, model: effectiveModel, tier: effectiveTier, depth },
       'Session spawned into mesh with isolated context window',
@@ -802,10 +844,57 @@ export class SessionManager {
   }
 
   /**
+   * Evict idle or errored session containers that have exceeded the TTL or LRU cap.
+   * Running, paused, or queued sessions are never evicted, and evicted idle sessions
+   * are transparently rehydrated from SQLite via `ensureSessionActive` when needed.
+   */
+  public pruneInactiveSessions(
+    maxIdleSessions = SessionManager.MAX_ACTIVE_IDLE_SESSIONS,
+    idleTtlMs = SessionManager.IDLE_SESSION_TTL_MS,
+  ): number {
+    const now = Date.now();
+    let evicted = 0;
+    const evictable: Array<{ id: string; lastAccessedAt: number }> = [];
+
+    for (const [id, container] of this.activeSessions.entries()) {
+      const status = container.record.status;
+      if (
+        status === 'running' ||
+        status === 'paused' ||
+        container.isProcessingQueue ||
+        container.queue.length > 0
+      ) {
+        continue;
+      }
+      if (now - container.lastAccessedAt > idleTtlMs) {
+        this.activeSessions.delete(id);
+        evicted++;
+      } else {
+        evictable.push({ id, lastAccessedAt: container.lastAccessedAt });
+      }
+    }
+
+    if (evictable.length > maxIdleSessions) {
+      evictable.sort((a, b) => a.lastAccessedAt - b.lastAccessedAt);
+      const excess = evictable.length - maxIdleSessions;
+      for (let i = 0; i < excess; i++) {
+        this.activeSessions.delete(evictable[i].id);
+        evicted++;
+      }
+    }
+
+    return evicted;
+  }
+
+  /**
    * Terminate a session.
    */
   async terminateSession(sessionId: string): Promise<void> {
     const container = this.activeSessions.get(sessionId);
+    const providerName = container?.record.provider ?? (await this.storage.getSession(sessionId))?.provider;
+    if (providerName) {
+      this.providerRegistry.get(providerName)?.clearSessionState?.(sessionId);
+    }
     if (container) {
       container.record.status = 'terminated';
       container.runtime.setStatus('terminated');
@@ -902,6 +991,10 @@ export class SessionManager {
     }
   }
 
+  public getActiveInMemorySessionCount(): number {
+    return this.activeSessions.size;
+  }
+
   private async executeTurn(
     sessionId: string,
     content: string,
@@ -910,6 +1003,7 @@ export class SessionManager {
     const container = this.activeSessions.get(sessionId);
     if (!container) throw new Error(`Active session container not found: ${sessionId}`);
 
+    container.lastAccessedAt = Date.now();
     container.record.status = 'running';
     container.runtime.setStatus('running');
     await this.storage.updateSessionStatus(sessionId, 'running');
@@ -934,6 +1028,7 @@ export class SessionManager {
       container.record.total_tool_calls = state.totalToolCalls;
       container.record.iterations = state.iterations;
       container.record.status = finalStatus;
+      container.lastAccessedAt = Date.now();
       if (state.lastError) {
         container.record.last_error = state.lastError;
       }
@@ -959,6 +1054,7 @@ export class SessionManager {
       const errorMsg = err instanceof Error ? err.message : String(err);
       container.record.status = 'error';
       container.record.last_error = errorMsg;
+      container.lastAccessedAt = Date.now();
       container.runtime.setStatus('error');
 
       await this.storage.updateSessionStatus(sessionId, 'error', {
@@ -974,12 +1070,17 @@ export class SessionManager {
       });
 
       throw err;
+    } finally {
+      this.pruneInactiveSessions();
     }
   }
 
   private async ensureSessionActive(sessionId: string): Promise<ActiveSessionContainer> {
     const existing = this.activeSessions.get(sessionId);
-    if (existing) return existing;
+    if (existing) {
+      existing.lastAccessedAt = Date.now();
+      return existing;
+    }
 
     // Attempt resurrection from DB
     const record = await this.storage.getSession(sessionId);
@@ -1022,9 +1123,11 @@ export class SessionManager {
       depth: 1,
       queue: [],
       isProcessingQueue: false,
+      lastAccessedAt: Date.now(),
     };
 
     this.activeSessions.set(sessionId, container);
+    this.pruneInactiveSessions();
     return container;
   }
 

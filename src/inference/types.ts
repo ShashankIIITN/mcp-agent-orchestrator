@@ -63,6 +63,10 @@ export interface CompletionOptions {
   sessionId?: string;
   /** Optional workspace path to mount into CLI providers (e.g. agy --add-dir). */
   workspacePath?: string;
+  /** Effective orchestrator safety mode to enforce on native CLI tool executions. */
+  safetyMode?: 'autonomous' | 'semi-autonomous' | 'safe';
+  /** Explicit allowlist of orchestrator tool names permitted for this session/agent. */
+  allowedToolNames?: string[];
   /** Optional callback for real-time streaming progress events (tool executions, text deltas, token usage). */
   onProgress?: (event: CompletionProgressEvent) => void;
 }
@@ -103,4 +107,9 @@ export interface LLMProvider {
    * Check if the provider is properly configured and reachable.
    */
   healthCheck(): Promise<boolean>;
+
+  /**
+   * Optional cleanup hook to evict cached conversation state for a terminated or evicted session.
+   */
+  clearSessionState?(sessionId?: string): void;
 }

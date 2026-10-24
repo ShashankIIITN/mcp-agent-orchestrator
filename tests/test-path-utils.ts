@@ -4,7 +4,12 @@ import os from 'node:os';
 import { mkdtempSync, mkdirSync, writeFileSync, symlinkSync, rmSync } from 'node:fs';
 import { expandHome, isPathInside, validateWorkspacePath } from '../src/utils/path-utils.js';
 import { PolicyEngine } from '../src/orchestrator/policy-engine.js';
-import { findAgyBinaryPath, isAgyAvailable } from '../src/inference/providers/agy-provider.js';
+import {
+  findAgyBinaryPath,
+  isAgyAvailable,
+  isExecutableFile,
+  searchPath,
+} from '../src/inference/providers/agy-provider.js';
 
 console.log('🧭 Cross-platform path utility tests (' + process.platform + ')\n');
 
@@ -59,10 +64,20 @@ try {
   }
   console.log('5️⃣ PolicyEngine ✅');
 
-  // 6. agy discovery never throws and returns a string
+  // 6. agy discovery never throws, returns a string, and ignores directory collisions on PATH
   assert.strictEqual(typeof findAgyBinaryPath(), 'string');
   assert.strictEqual(typeof isAgyAvailable(), 'boolean');
-  console.log('6️⃣ agy binary discovery ✅');
+  const fakePathDir = path.join(tmp, 'fake-bin');
+  mkdirSync(fakePathDir);
+  mkdirSync(path.join(fakePathDir, 'agy'));
+  mkdirSync(path.join(fakePathDir, 'agy.exe'));
+  assert.strictEqual(isExecutableFile(path.join(fakePathDir, 'agy')), false, 'directory must not be treated as executable file');
+  assert.strictEqual(isExecutableFile(path.join(fakePathDir, 'agy.exe')), false, 'directory named agy.exe must not be treated as file');
+  const origPath = process.env.PATH;
+  process.env.PATH = fakePathDir;
+  assert.strictEqual(searchPath('agy'), undefined, 'searchPath must ignore directory collisions');
+  process.env.PATH = origPath;
+  console.log('6️⃣ agy binary discovery & directory collision guard ✅');
 
   console.log('\n🎉 PATH UTILITY TESTS PASSED\n');
 } finally {

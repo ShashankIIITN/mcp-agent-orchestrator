@@ -1,9 +1,10 @@
 import { spawn } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, delimiter, isAbsolute } from 'node:path';
 import { createLogger } from '../../utils/logger.js';
-import { expandHome } from '../../utils/path-utils.js';
+import { expandHome, isPathInside, resolveCrossPlatformPath } from '../../utils/path-utils.js';
+import { findDangerousCommand } from '../../utils/command-guard.js';
 import type {
   LLMProvider,
   ChatMessage,
@@ -18,7 +19,8 @@ const logger = createLogger('provider:agy');
 /**
  * Built-in orchestrator tools that `agy` already provides natively at much higher speed
  * (`read_file`/`view_file`, `list_dir`, `find_by_name`, `grep_search`, `run_command`, `write_to_file`, etc.).
- * Omitting these from the prompt's synthetic JSON tool-call block avoids multi-process cold-start loops.
+ * Omitting these from the prompt's synthetic JSON tool-call block avoids multi-process cold-start loops,
+ * while native tool executions are actively policed against `safetyMode`, `allowedToolNames`, and `workspacePath`.
  */
 const NATIVE_EQUIVALENT_TOOLS = new Set([
   'fs_read',
@@ -27,6 +29,30 @@ const NATIVE_EQUIVALENT_TOOLS = new Set([
   'fs_list',
   'shell_exec',
   'web_fetch',
+]);
+
+const NATIVE_WRITE_TOOLS = new Set([
+  'write_file',
+  'write_to_file',
+  'edit_file',
+  'replace_file_content',
+  'multi_replace_file_content',
+  'create_file',
+  'patch_file',
+]);
+
+const NATIVE_DELETE_TOOLS = new Set([
+  'delete_file',
+  'remove_file',
+  'rm',
+]);
+
+const NATIVE_SHELL_TOOLS = new Set([
+  'run_command',
+  'execute_command',
+  'bash',
+  'shell',
+  'shell_exec',
 ]);
 
 export interface AgyProviderOptions {
@@ -55,21 +81,43 @@ interface AgyCliResponse {
 }
 
 /**
- * Search the system PATH for an executable, honouring the platform's path
- * delimiter (`:` on Linux/macOS, `;` on Windows). On Windows only real
- * executables (.exe) are considered, since `.cmd`/`.bat` shims cannot be
- * spawned safely without a shell.
+ * Verify that `candidate` is a regular file (never a directory) and on POSIX
+ * has at least one executable bit set.
  */
-function searchPath(binaryName: string): string | undefined {
+export function isExecutableFile(candidate: string): boolean {
+  try {
+    const st = statSync(candidate);
+    if (!st.isFile()) return false;
+    if (process.platform !== 'win32') {
+      return (st.mode & 0o111) !== 0;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Search the system PATH for an executable file, honouring the platform's path
+ * delimiter (`:` on Linux/macOS, `;` on Windows). On Windows only `.exe` files
+ * are matched, preventing extensionless directory collisions (e.g. a directory
+ * named `agy` inside a PATH entry).
+ */
+export function searchPath(binaryName: string): string | undefined {
   const pathDirs = (process.env.PATH || process.env.Path || '')
     .split(delimiter)
     .filter(Boolean);
-  const exts = process.platform === 'win32' ? ['', '.exe'] : [''];
+  const exts =
+    process.platform === 'win32'
+      ? binaryName.toLowerCase().endsWith('.exe')
+        ? ['']
+        : ['.exe']
+      : [''];
 
   for (const dir of pathDirs) {
     for (const ext of exts) {
       const candidate = join(dir, binaryName + ext);
-      if (existsSync(candidate)) return candidate;
+      if (isExecutableFile(candidate)) return candidate;
     }
   }
   return undefined;
@@ -77,20 +125,18 @@ function searchPath(binaryName: string): string | undefined {
 
 /**
  * Cross-platform discovery for the agy CLI binary (Windows, macOS, Linux).
+ * Checks explicit overrides and trusted installation directories BEFORE ambient PATH
+ * to prevent untrusted PATH preemption.
  */
 export function findAgyBinaryPath(customPath?: string): string {
   if (customPath) {
     const expanded = expandHome(customPath);
-    if (existsSync(expanded)) return expanded;
+    if (isExecutableFile(expanded)) return expanded;
   }
   if (process.env.AGY_BIN_PATH) {
     const expanded = expandHome(process.env.AGY_BIN_PATH);
-    if (existsSync(expanded)) return expanded;
+    if (isExecutableFile(expanded)) return expanded;
   }
-
-  // Anything on the system PATH wins (covers Homebrew, snap, npm global, etc.)
-  const onPath = searchPath('agy');
-  if (onPath) return onPath;
 
   const candidates: string[] = [];
 
@@ -112,24 +158,28 @@ export function findAgyBinaryPath(customPath?: string): string {
   }
 
   for (const p of candidates) {
-    if (existsSync(p)) return p;
+    if (isExecutableFile(p)) return p;
   }
 
-  return 'agy'; // Last resort: let the OS try to resolve it
+  // Fallback to searching system PATH
+  const onPath = searchPath('agy');
+  if (onPath) return onPath;
+
+  return 'agy'; // Last resort identifier; validated via isAgyAvailable before spawn
 }
 
 /**
- * Whether the agy binary can actually be located. Unlike a bare `existsSync`,
- * this also resolves bare command names via the system PATH.
+ * Whether the agy binary can actually be located as an executable file.
  */
 export function isAgyAvailable(binaryPath: string = findAgyBinaryPath()): boolean {
   if (isAbsolute(binaryPath) || binaryPath.includes('/') || binaryPath.includes('\\')) {
-    return existsSync(binaryPath);
+    return isExecutableFile(binaryPath);
   }
   return searchPath(binaryPath) !== undefined;
 }
 
 export class AgyProvider implements LLMProvider {
+  private static readonly MAX_TRACKED_CONVERSATIONS = 200;
   readonly name: string;
   private readonly binaryPath: string;
   private readonly defaultModel: string;
@@ -143,6 +193,44 @@ export class AgyProvider implements LLMProvider {
     this.effort = options?.effort || 'medium';
   }
 
+  /**
+   * Evict cached CLI conversation IDs for a specific session (on termination/eviction)
+   * or clear all tracked conversations.
+   */
+  public clearSessionState(sessionId?: string): void {
+    if (sessionId) {
+      this.sessionConversations.delete(sessionId);
+    } else {
+      this.sessionConversations.clear();
+    }
+  }
+
+  public getTrackedConversationCount(): number {
+    return this.sessionConversations.size;
+  }
+
+  private getTrackedConversation(sessionId: string): string | undefined {
+    const convId = this.sessionConversations.get(sessionId);
+    if (convId !== undefined) {
+      // Refresh LRU insertion order
+      this.sessionConversations.delete(sessionId);
+      this.sessionConversations.set(sessionId, convId);
+    }
+    return convId;
+  }
+
+  private setTrackedConversation(sessionId: string, conversationId: string): void {
+    if (this.sessionConversations.has(sessionId)) {
+      this.sessionConversations.delete(sessionId);
+    }
+    this.sessionConversations.set(sessionId, conversationId);
+    while (this.sessionConversations.size > AgyProvider.MAX_TRACKED_CONVERSATIONS) {
+      const oldestKey = this.sessionConversations.keys().next().value;
+      if (oldestKey === undefined) break;
+      this.sessionConversations.delete(oldestKey);
+    }
+  }
+
   private normalizeModelName(model: string): string {
     const trimmed = model.trim();
     if (trimmed === 'gemini-3.8-flash-lite') {
@@ -151,13 +239,88 @@ export class AgyProvider implements LLMProvider {
     return trimmed;
   }
 
+  /**
+   * Enforce orchestrator security policy (`safetyMode`, `allowedToolNames`, `workspacePath`,
+   * and dangerous shell command guards) on native tools executed inside the `agy` child process.
+   * Returns a violation reason string if blocked, or `undefined` if permitted.
+   */
+  public validateNativeToolExecution(
+    toolName: string,
+    toolArgs: Record<string, unknown> | undefined,
+    options?: CompletionOptions,
+  ): string | undefined {
+    const lowerTool = (toolName || '').toLowerCase();
+    const safetyMode = options?.safetyMode ?? 'semi-autonomous';
+    const allowedSet = options?.allowedToolNames
+      ? new Set(options.allowedToolNames)
+      : options?.tools
+        ? new Set(options.tools.map((t) => t.name))
+        : undefined;
+
+    // 1. Check write/mutation tools
+    if (NATIVE_WRITE_TOOLS.has(lowerTool)) {
+      if (safetyMode === 'safe') {
+        return `File modification tool "${toolName}" is blocked in safe mode`;
+      }
+      if (allowedSet && !allowedSet.has('fs_write')) {
+        return `File modification tool "${toolName}" is not permitted by session allowed_tools (requires fs_write)`;
+      }
+    }
+
+    // 2. Check delete tools
+    if (NATIVE_DELETE_TOOLS.has(lowerTool)) {
+      if (safetyMode !== 'autonomous') {
+        return `File deletion tool "${toolName}" requires autonomous safety_mode (current: ${safetyMode})`;
+      }
+      if (allowedSet && !allowedSet.has('fs_delete')) {
+        return `File deletion tool "${toolName}" is not permitted by session allowed_tools (requires fs_delete)`;
+      }
+    }
+
+    // 3. Check shell execution tools
+    if (NATIVE_SHELL_TOOLS.has(lowerTool)) {
+      if (safetyMode === 'safe') {
+        return `Shell execution tool "${toolName}" is blocked in safe mode`;
+      }
+      if (allowedSet && !allowedSet.has('shell_exec')) {
+        return `Shell execution tool "${toolName}" is not permitted by session allowed_tools (requires shell_exec)`;
+      }
+      const cmd = String(
+        toolArgs?.CommandLine ?? toolArgs?.command ?? toolArgs?.cmd ?? '',
+      );
+      if (cmd && safetyMode !== 'autonomous') {
+        const danger = findDangerousCommand(cmd);
+        if (danger) {
+          return `Shell command blocked by dangerous command guard (${danger}): ${cmd}`;
+        }
+      }
+    }
+
+    // 4. Enforce workspace path confinement on file/search tools when workspacePath is configured
+    if (options?.workspacePath && toolArgs) {
+      const pathKeys = ['Path', 'path', 'TargetFile', 'SearchPath', 'DirectoryPath', 'File'];
+      for (const key of pathKeys) {
+        const rawTarget = toolArgs[key];
+        if (typeof rawTarget === 'string' && rawTarget.trim()) {
+          const resolvedWorkspace = resolveCrossPlatformPath(options.workspacePath);
+          const resolvedTarget = resolveCrossPlatformPath(rawTarget.trim(), resolvedWorkspace);
+          if (!isPathInside(resolvedTarget, resolvedWorkspace)) {
+            return `Target path "${rawTarget}" in tool "${toolName}" escapes confined workspace "${options.workspacePath}"`;
+          }
+        }
+      }
+    }
+
+    return undefined;
+  }
+
   async complete(
     messages: ChatMessage[],
     options?: CompletionOptions,
   ): Promise<CompletionResponse> {
     const requestedModel = this.normalizeModelName(options?.model || this.defaultModel);
     const existingConversationId = options?.sessionId
-      ? this.sessionConversations.get(options.sessionId)
+      ? this.getTrackedConversation(options.sessionId)
       : undefined;
 
     const lastMsg = messages[messages.length - 1];
@@ -180,6 +343,9 @@ export class AgyProvider implements LLMProvider {
           existingConversationId,
           options?.workspacePath,
           options?.onProgress,
+          180000,
+          600000,
+          options,
         );
       } catch (primaryErr) {
         const errText = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
@@ -200,6 +366,9 @@ export class AgyProvider implements LLMProvider {
             existingConversationId,
             options?.workspacePath,
             options?.onProgress,
+            180000,
+            600000,
+            options,
           );
         } else {
           throw primaryErr;
@@ -207,7 +376,7 @@ export class AgyProvider implements LLMProvider {
       }
 
       if (options?.sessionId && outputJson.conversation_id) {
-        this.sessionConversations.set(options.sessionId, outputJson.conversation_id);
+        this.setTrackedConversation(options.sessionId, outputJson.conversation_id);
       }
 
       if (outputJson.status !== 'SUCCESS') {
@@ -251,14 +420,31 @@ export class AgyProvider implements LLMProvider {
   private formatPrompt(messages: ChatMessage[], options?: CompletionOptions): string {
     let formatted = '';
 
+    const safetyMode = options?.safetyMode ?? 'semi-autonomous';
+    const allowedSet = options?.allowedToolNames
+      ? new Set(options.allowedToolNames)
+      : options?.tools
+        ? new Set(options.tools.map((t) => t.name))
+        : undefined;
+
+    const canWrite = safetyMode !== 'safe' && (!allowedSet || allowedSet.has('fs_write'));
+    const canExecShell = safetyMode !== 'safe' && (!allowedSet || allowedSet.has('shell_exec'));
+
     // Only expose non-builtin tools (such as mesh_* inter-session tools) as JSON codeblock tools.
-    // Built-in file/shell tools (fs_read, fs_list, shell_exec, etc.) are executed natively by agy
-    // inside a single CLI session at 100x higher speed.
     const customTools = (options?.tools ?? []).filter((t) => !NATIVE_EQUIVALENT_TOOLS.has(t.name));
 
     formatted += `[ORCHESTRATOR WORKER CONTEXT]\n`;
-    formatted += `- You are executing inside an isolated specialist session managed by mcp-agent-orchestrator.\n`;
+    formatted += `- You are executing inside an isolated specialist session managed by mcp-agent-orchestrator (safety_mode: ${safetyMode}).\n`;
     formatted += `- Use your built-in file and search tools (read_file, view_file, list_dir, find_by_name, grep_search) directly for workspace inspection. Avoid recursively listing node_modules/, dist/, or .git/.\n`;
+    if (options?.workspacePath) {
+      formatted += `- WORKSPACE CONFINEMENT: All file operations MUST remain strictly inside "${options.workspacePath}".\n`;
+    }
+    if (!canWrite) {
+      formatted += `- READ-ONLY POLICY: You are NOT permitted to create, edit, or delete files in this session.\n`;
+    }
+    if (!canExecShell) {
+      formatted += `- NO-SHELL POLICY: You are NOT permitted to execute shell commands (run_command) in this session.\n`;
+    }
     formatted += `- Do NOT call external mcp_agent-orchestrator_* MCP server tools from inside this worker session unless explicitly instructed.\n`;
 
     if (customTools.length > 0) {
@@ -317,8 +503,17 @@ export class AgyProvider implements LLMProvider {
     onProgress?: (event: CompletionProgressEvent) => void,
     inactivityTimeoutMs = 180000,
     maxTotalTimeoutMs = 600000,
+    options?: CompletionOptions,
   ): Promise<AgyCliResponse> {
     return new Promise((resolve, reject) => {
+      if (!isAgyAvailable(this.binaryPath)) {
+        return reject(
+          new Error(
+            `agy CLI binary not found or not executable at "${this.binaryPath}". Set AGY_BIN_PATH or configure binaryPath in orchestrator.yaml.`,
+          ),
+        );
+      }
+
       const args = [
         '-p',
         prompt,
@@ -449,6 +644,15 @@ export class AgyProvider implements LLMProvider {
             } else if (su.step_type === 'tool') {
               const toolName = su.tool_name || su.tool_info?.name || 'tool';
               const toolArgs = su.tool_info?.parameters || {};
+              const violation = this.validateNativeToolExecution(toolName, toolArgs, options);
+              if (violation) {
+                logger.warn({ toolName, toolArgs, violation }, 'Blocked unauthorized native tool execution in agy');
+                if (inactivityTimer) clearTimeout(inactivityTimer);
+                clearTimeout(maxTimer);
+                proc.kill();
+                reject(new Error(`Security policy violation: ${violation}`));
+                return;
+              }
               if (su.state === 'ACTIVE') {
                 onProgress?.({
                   type: 'tool_start',
