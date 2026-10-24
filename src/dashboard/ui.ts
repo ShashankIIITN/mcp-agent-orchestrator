@@ -495,10 +495,166 @@ export function renderDashboardHtml(): string {
 
     .msg-body {
       font-size: 0.84rem;
-      line-height: 1.55;
-      white-space: pre-wrap;
+      line-height: 1.6;
       word-break: break-word;
       color: var(--text-secondary);
+    }
+
+    .msg-bubble.tool .msg-body {
+      white-space: pre-wrap;
+      font-family: var(--font-mono);
+      font-size: 0.77rem;
+    }
+
+    /* ── Rich GitHub-Flavored Markdown Typography (.markdown-body) ── */
+    .markdown-body {
+      font-family: var(--font-sans);
+      font-size: 0.87rem;
+      line-height: 1.65;
+      color: var(--text);
+      word-break: break-word;
+    }
+
+    .markdown-body > *:first-child {
+      margin-top: 0 !important;
+    }
+
+    .markdown-body > *:last-child {
+      margin-bottom: 0 !important;
+    }
+
+    .markdown-body h1,
+    .markdown-body h2,
+    .markdown-body h3,
+    .markdown-body h4,
+    .markdown-body h5,
+    .markdown-body h6 {
+      color: var(--text);
+      font-weight: 700;
+      line-height: 1.3;
+      margin-top: 1.15rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .markdown-body h1 { font-size: 1.25rem; border-bottom: 1px solid var(--border-light); padding-bottom: 0.35rem; }
+    .markdown-body h2 { font-size: 1.1rem; border-bottom: 1px solid var(--border-light); padding-bottom: 0.3rem; }
+    .markdown-body h3 { font-size: 0.98rem; color: var(--primary); }
+    .markdown-body h4 { font-size: 0.9rem; color: var(--text-secondary); }
+
+    .markdown-body p {
+      margin: 0.55rem 0;
+    }
+
+    .markdown-body ul,
+    .markdown-body ol {
+      margin: 0.55rem 0;
+      padding-left: 1.45rem;
+    }
+
+    .markdown-body li {
+      margin: 0.28rem 0;
+    }
+
+    .markdown-body li > ul,
+    .markdown-body li > ol {
+      margin: 0.2rem 0;
+    }
+
+    .markdown-body strong {
+      color: #f8fafc;
+      font-weight: 700;
+    }
+
+    .markdown-body em {
+      color: var(--text-secondary);
+      font-style: italic;
+    }
+
+    .markdown-body code {
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      background: rgba(56, 189, 248, 0.1);
+      color: #7dd3fc;
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      padding: 0.12rem 0.38rem;
+      border-radius: 4px;
+    }
+
+    .markdown-body pre {
+      background: #020617;
+      border: 1px solid var(--border-light);
+      border-radius: 8px;
+      padding: 0.85rem 1rem;
+      margin: 0.75rem 0;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.79rem;
+      line-height: 1.55;
+      color: #e2e8f0;
+    }
+
+    .markdown-body pre code {
+      background: transparent;
+      border: none;
+      padding: 0;
+      color: inherit;
+      font-size: inherit;
+    }
+
+    .markdown-body .md-code-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: var(--bg-elevated);
+      border: 1px solid var(--border-light);
+      border-bottom: none;
+      border-radius: 8px 8px 0 0;
+      padding: 0.3rem 0.75rem;
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      margin-top: 0.75rem;
+    }
+
+    .markdown-body .md-code-header + pre {
+      margin-top: 0;
+      border-top-left-radius: 0;
+      border-top-right-radius: 0;
+    }
+
+    .markdown-body blockquote {
+      margin: 0.65rem 0;
+      padding: 0.55rem 0.9rem;
+      border-left: 3px solid var(--primary);
+      background: rgba(56, 189, 248, 0.06);
+      border-radius: 0 6px 6px 0;
+      color: var(--text-secondary);
+    }
+
+    .markdown-body hr {
+      border: none;
+      border-top: 1px solid var(--border-light);
+      margin: 1rem 0;
+    }
+
+    .markdown-body a {
+      color: var(--primary);
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+
+    .markdown-body .md-file-ref {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.25rem;
+      font-family: var(--font-mono);
+      font-size: 0.77rem;
+      background: rgba(99, 102, 241, 0.14);
+      color: #a5b4fc;
+      border: 1px solid rgba(99, 102, 241, 0.3);
+      padding: 0.08rem 0.42rem;
+      border-radius: 4px;
+      text-decoration: none;
     }
 
     .composer-bar {
@@ -869,7 +1025,7 @@ export function renderDashboardHtml(): string {
               <button type="button" class="btn btn-outline" onclick="triggerQuickPrompt('Inspect tests/ and summarize test coverage and any untested edge cases.')">🧪 Audit Test Suite</button>
             </div>
           </div>
-          <pre id="sessOutputContent" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1rem; white-space: pre-wrap; word-break: break-word; font-family: var(--font-sans); font-size: 0.86rem; line-height: 1.6; max-height: 440px; overflow-y: auto; color: var(--text);">No output generated yet.</pre>
+          <div id="sessOutputContent" class="markdown-body" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1.05rem 1.2rem; font-family: var(--font-sans); font-size: 0.86rem; line-height: 1.65; max-height: 480px; overflow-y: auto; color: var(--text);">No output generated yet.</div>
         </div>
 
         <!-- Conversation Transcript & Live Turn Composer -->
@@ -993,7 +1149,7 @@ export function renderDashboardHtml(): string {
             <div class="card-title">✨ Consolidated Output</div>
             <button class="btn btn-outline" onclick="copyTextById('jobOutputContent')">Copy Output</button>
           </div>
-          <pre id="jobOutputContent" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1rem; white-space: pre-wrap; word-break: break-word; font-size: 0.83rem; line-height: 1.55; max-height: 360px; overflow-y: auto;"></pre>
+          <div id="jobOutputContent" class="markdown-body" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1.05rem 1.2rem; font-size: 0.85rem; line-height: 1.65; max-height: 440px; overflow-y: auto;"></div>
         </div>
 
         <div class="card" id="jobArtifactsCard" style="display: none;">
@@ -1119,7 +1275,7 @@ export function renderDashboardHtml(): string {
         <button type="button" class="btn btn-outline" onclick="document.getElementById('artifactPreviewDialog').close()">Close</button>
       </div>
     </div>
-    <pre id="artifactDialogContent" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1rem; white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono); font-size: 0.8rem; max-height: 65vh; overflow-y: auto;"></pre>
+    <div id="artifactDialogContent" class="markdown-body" style="background: var(--bg-root); border: 1px solid var(--border-light); border-radius: 8px; padding: 1.05rem 1.2rem; font-size: 0.85rem; line-height: 1.65; max-height: 68vh; overflow-y: auto;"></div>
   </dialog>
 
   <script>
@@ -1191,6 +1347,241 @@ export function renderDashboardHtml(): string {
         .replace(/>/g, '&gt;')
         .replace(/"/g, '&quot;')
         .replace(/'/g, '&#39;');
+    }
+
+    // ── Safe GFM Markdown Parser & Sanitizer (modern-web-guidance: sanitize-untrusted-html) ──
+    const MD_SANITIZER_CONFIG = {
+      elements: [
+        'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+        'p', 'br', 'hr', 'blockquote',
+        'ul', 'ol', 'li',
+        'pre', 'code', 'div', 'span',
+        'strong', 'em', 'del', 'a',
+        'table', 'thead', 'tbody', 'tr', 'th', 'td'
+      ],
+      attributes: ['href', 'target', 'rel', 'class', 'title', 'value']
+    };
+
+    function formatInlineMarkdown(rawLine) {
+      // 1. Extract inline code spans into placeholders before escaping/linking
+      const codeSpans = [];
+      let text = String(rawLine || '').replace(/\\x60([^\\x60\\n]+)\\x60/g, (_, code) => {
+        const idx = codeSpans.length;
+        codeSpans.push(\`<code>\${escapeHtml(code)}</code>\`);
+        return \`\\x00CODE\${idx}\\x00\`;
+      });
+
+      // 2. Escape remaining raw HTML characters
+      text = escapeHtml(text);
+
+      // 3. Markdown links: [label](url) — supports file:/// workspace references and http(s):// links
+      text = text.replace(/\\[([^\\]]+)\\]\\(((?:[^()\\s]|\\([^()\\s]*\\))+)\\)/g, (_, label, rawHref) => {
+        const href = rawHref.replace(/&amp;/g, '&');
+        if (/^https?:\\/\\//i.test(href)) {
+          return \`<a href="\${escapeHtml(href)}" target="_blank" rel="noopener noreferrer">\${label}</a>\`;
+        }
+        if (/^file:\\/\\/\\//i.test(href)) {
+          const decodedTitle = decodeURIComponent(href.replace(/^file:\\/\\/\\//i, ''));
+          return \`<span class="md-file-ref" title="\${escapeHtml(decodedTitle)}">📄 \${label}</span>\`;
+        }
+        return \`<code>\${label}</code>\`;
+      });
+
+      // 4. Bold + Italic, Bold, Italic, Strikethrough
+      text = text
+        .replace(/\\*\\*\\*([^*\\n]+)\\*\\*\\*/g, '<strong><em>$1</em></strong>')
+        .replace(/\\*\\*([^*\\n]+)\\*\\*/g, '<strong>$1</strong>')
+        .replace(/__([^_\\n]+)__/g, '<strong>$1</strong>')
+        .replace(/(^|[\\s(])\\*([^*\\n]+)\\*(?=[\\s).,!?:;]|$)/g, '$1<em>$2</em>')
+        .replace(/~~([^~\\n]+)~~/g, '<del>$1</del>');
+
+      // 5. Restore inline code spans
+      text = text.replace(/\\x00CODE(\\d+)\\x00/g, (_, idx) => codeSpans[Number(idx)] || '');
+      return text;
+    }
+
+    function renderMarkdownToHtml(rawText) {
+      if (!rawText) return '';
+      const normalized = String(rawText).replace(/\\r\\n/g, '\\n');
+
+      // Extract fenced code blocks (including unclosed trailing fences during live SSE streaming)
+      const codeBlocks = [];
+      let working = normalized.replace(/\\x60{3}([a-zA-Z0-9_+.-]*)?[ \\t]*\\n([\\s\\S]*?)(?:\\x60{3}|$)/g, (_, lang, code) => {
+        const idx = codeBlocks.length;
+        const cleanLang = (lang || 'code').trim();
+        const trimmedCode = code.replace(/\\n$/, '');
+        codeBlocks.push(
+          \`<pre><div class="md-code-header"><span>\${escapeHtml(cleanLang)}</span></div><code>\${escapeHtml(trimmedCode)}</code></pre>\`
+        );
+        return \`\\n@@MD_CODE_BLOCK_\${idx}@@\\n\`;
+      });
+
+      const lines = working.split('\\n');
+      const out = [];
+      let i = 0;
+
+      while (i < lines.length) {
+        const line = lines[i];
+        const trimmed = line.trim();
+
+        // Empty line
+        if (!trimmed) {
+          i++;
+          continue;
+        }
+
+        // Extracted fenced code block placeholder
+        const codeMatch = trimmed.match(/^@@MD_CODE_BLOCK_(\\d+)@@$/);
+        if (codeMatch) {
+          out.push(codeBlocks[Number(codeMatch[1])] || '');
+          i++;
+          continue;
+        }
+
+        // Horizontal rule
+        if (/^(?:---+|\\*\\*\\*+|___+)$/.test(trimmed)) {
+          out.push('<hr>');
+          i++;
+          continue;
+        }
+
+        // ATX Heading (# to ######)
+        const headingMatch = line.match(/^\\s*(#{1,6})\\s+(.+)$/);
+        if (headingMatch) {
+          const level = headingMatch[1].length;
+          out.push(\`<h\${level}>\${formatInlineMarkdown(headingMatch[2].trim())}</h\${level}>\`);
+          i++;
+          continue;
+        }
+
+        // Blockquote (> ...)
+        if (/^\\s*>\\s?/.test(line)) {
+          const quoteLines = [];
+          while (i < lines.length && /^\\s*>\\s?/.test(lines[i])) {
+            quoteLines.push(lines[i].replace(/^\\s*>\\s?/, ''));
+            i++;
+          }
+          out.push(\`<blockquote>\${renderMarkdownToHtml(quoteLines.join('\\n'))}</blockquote>\`);
+          continue;
+        }
+
+        // GFM Table
+        if (
+          trimmed.startsWith('|') &&
+          i + 1 < lines.length &&
+          /^\\s*\\|[\\s:-]+\\|/.test(lines[i + 1])
+        ) {
+          const parseRow = (r) =>
+            r.trim().replace(/^\\|/, '').replace(/\\|$/, '').split('|').map((c) => formatInlineMarkdown(c.trim()));
+          const headers = parseRow(lines[i]);
+          i += 2; // Skip header & separator
+          const rows = [];
+          while (i < lines.length && lines[i].trim().startsWith('|')) {
+            rows.push(parseRow(lines[i]));
+            i++;
+          }
+          out.push(
+            \`<table><thead><tr>\${headers.map((h) => \`<th>\${h}</th>\`).join('')}</tr></thead><tbody>\` +
+            rows.map((r) => \`<tr>\${r.map((c) => \`<td>\${c}</td>\`).join('')}</tr>\`).join('') +
+            '</tbody></table>'
+          );
+          continue;
+        }
+
+        // Lists (Ordered & Unordered, with nested sub-list support)
+        const listMatch = line.match(/^(\\s*)(?:(\\d+)[.)]|([-*+]))\\s+(.*)$/);
+        if (listMatch) {
+          const isOrdered = Boolean(listMatch[2]);
+          const listTag = isOrdered ? 'ol' : 'ul';
+          const itemsHtml = [];
+
+          while (i < lines.length) {
+            const itemLine = lines[i];
+            if (!itemLine.trim()) {
+              // Look ahead to see if the list continues after a single blank line
+              if (i + 1 < lines.length && /^(\\s*)(?:(\\d+)[.)]|([-*+]))\\s+/.test(lines[i + 1])) {
+                i++;
+                continue;
+              }
+              break;
+            }
+            const m = itemLine.match(/^(\\s*)(?:(\\d+)[.)]|([-*+]))\\s+(.*)$/);
+            if (!m) break;
+            const indent = m[1].length;
+            const itemOrdered = Boolean(m[2]);
+
+            // If this is a top-level item of a different list type, close current list
+            if (indent < 2 && itemOrdered !== isOrdered) break;
+
+            if (indent >= 2 && itemsHtml.length > 0) {
+              // Collect nested sub-list lines
+              const subTag = itemOrdered ? 'ol' : 'ul';
+              const subItems = [];
+              while (i < lines.length) {
+                const subLine = lines[i];
+                const sm = subLine.match(/^(\\s*)(?:(\\d+)[.)]|([-*+]))\\s+(.*)$/);
+                if (!sm || sm[1].length < 2) break;
+                const valAttr = sm[2] ? \` value="\${Number(sm[2])}"\` : '';
+                subItems.push(\`<li\${valAttr}>\${formatInlineMarkdown(sm[4])}</li>\`);
+                i++;
+              }
+              itemsHtml[itemsHtml.length - 1] = itemsHtml[itemsHtml.length - 1].replace(
+                /<\\/li>$/,
+                \`<\${subTag}>\${subItems.join('')}</\${subTag}></li>\`
+              );
+              continue;
+            }
+
+            const valAttr = m[2] ? \` value="\${Number(m[2])}"\` : '';
+            itemsHtml.push(\`<li\${valAttr}>\${formatInlineMarkdown(m[4])}</li>\`);
+            i++;
+          }
+
+          out.push(\`<\${listTag}>\${itemsHtml.join('')}</\${listTag}>\`);
+          continue;
+        }
+
+        // Paragraph block (accumulate consecutive non-special lines)
+        const paraLines = [];
+        while (
+          i < lines.length &&
+          lines[i].trim() &&
+          !/^@@MD_CODE_BLOCK_(\\d+)@@$/.test(lines[i].trim()) &&
+          !/^(?:---+|\\*\\*\\*+|___+)$/.test(lines[i].trim()) &&
+          !/^\\s*(#{1,6})\\s+/.test(lines[i]) &&
+          !/^\\s*>\\s?/.test(lines[i]) &&
+          !/^(\\s*)(?:(\\d+)[.)]|([-*+]))\\s+/.test(lines[i])
+        ) {
+          paraLines.push(formatInlineMarkdown(lines[i]));
+          i++;
+        }
+        if (paraLines.length > 0) {
+          out.push(\`<p>\${paraLines.join('<br>')}</p>\`);
+        } else {
+          i++;
+        }
+      }
+
+      return out.join('\\n');
+    }
+
+    function setMarkdownContent(el, rawText) {
+      if (!el) return;
+      const text = String(rawText === null || rawText === undefined ? '' : rawText);
+      el.dataset.rawMarkdown = text;
+      const html = renderMarkdownToHtml(text);
+      if ('setHTML' in Element.prototype) {
+        el.setHTML(html, { sanitizer: MD_SANITIZER_CONFIG });
+      } else {
+        el.innerHTML = html;
+      }
+    }
+
+    function renderMessageBodyHtml(role, content) {
+      if (role === 'tool') {
+        return escapeHtml(content);
+      }
+      return renderMarkdownToHtml(content);
     }
 
     function formatNumber(n) {
@@ -1491,10 +1882,12 @@ export function renderDashboardHtml(): string {
           outBadgeEl.className = 'badge badge-running';
           outBadgeEl.innerText = '⚡ Streaming Live...';
           outContentEl.style.borderColor = 'rgba(56, 189, 248, 0.45)';
-          outContentEl.innerText =
+          setMarkdownContent(
+            outContentEl,
             liveStreamText ||
-            (latestAssistant ? latestAssistant.content : '⏳ Specialist is inspecting workspace files and running tools in its isolated context window. Output will stream here live...');
-          outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Output</button>\`;
+              (latestAssistant ? latestAssistant.content : '⏳ Specialist is inspecting workspace files and running tools in its isolated context window. Output will stream here live...')
+          );
+          outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Markdown</button>\`;
         } else if (latestAssistant) {
           outQuickStartEl.style.display = 'none';
           const isErrOutput =
@@ -1505,7 +1898,7 @@ export function renderDashboardHtml(): string {
             outBadgeEl.className = 'badge badge-error';
             outBadgeEl.innerText = '❌ Execution Error';
             outContentEl.style.borderColor = 'rgba(248, 113, 113, 0.5)';
-            outContentEl.innerText = latestAssistant.content;
+            setMarkdownContent(outContentEl, latestAssistant.content);
             outActionsEl.innerHTML = \`
               <button type="button" class="btn btn-primary" onclick="triggerQuickPrompt(\${JSON.stringify(firstUserPrompt).replace(/"/g, '&quot;')})">↻ Retry Original Task</button>
               <button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy</button>
@@ -1514,15 +1907,15 @@ export function renderDashboardHtml(): string {
             outBadgeEl.className = 'badge badge-completed';
             outBadgeEl.innerText = '✓ Completed Deliverable';
             outContentEl.style.borderColor = 'rgba(52, 211, 153, 0.4)';
-            outContentEl.innerText = latestAssistant.content;
-            outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Output</button>\`;
+            setMarkdownContent(outContentEl, latestAssistant.content);
+            outActionsEl.innerHTML = \`<button type="button" class="btn btn-outline" onclick="copyTextById('sessOutputContent')">📋 Copy Markdown</button>\`;
           }
         } else {
           outQuickStartEl.style.display = 'block';
           outBadgeEl.className = 'badge badge-queued';
           outBadgeEl.innerText = '○ Awaiting First Task';
           outContentEl.style.borderColor = 'var(--border-light)';
-          outContentEl.innerText = 'No deliverable yet — click one of the quick-start tasks above or type an instruction below.';
+          setMarkdownContent(outContentEl, 'No deliverable yet — click one of the quick-start tasks above or type an instruction below.');
           outActionsEl.innerHTML = '';
         }
 
@@ -1538,7 +1931,7 @@ export function renderDashboardHtml(): string {
                 <strong>\${escapeHtml(m.role === 'tool' ? '🔧 TOOL EXECUTION' : m.role.toUpperCase())}</strong>
                 <span>\${formatRelativeTime(m.timestamp)}</span>
               </div>
-              <div class="msg-body">\${escapeHtml(m.content)}</div>
+              <div class="msg-body \${m.role === 'tool' ? '' : 'markdown-body'}">\${renderMessageBodyHtml(m.role, m.content)}</div>
             </div>
           \`).join('');
         }
@@ -1556,7 +1949,7 @@ export function renderDashboardHtml(): string {
               <td style="font-family: var(--font-mono); font-size: 0.75rem;">\${escapeHtml(msg.sender_session_id)} → \${escapeHtml(msg.recipient_session_id)}</td>
               <td><span class="badge badge-queued">\${escapeHtml(msg.message_type)}</span></td>
               <td><span class="badge \${msg.read ? 'badge-completed' : 'badge-running'}">\${msg.read ? 'Read' : 'Unread'}</span></td>
-              <td style="white-space: pre-wrap; max-width: 480px;">\${escapeHtml(msg.content)}</td>
+              <td class="markdown-body" style="max-width: 520px;">\${renderMarkdownToHtml(msg.content)}</td>
             </tr>
           \`).join('');
         }
@@ -1776,7 +2169,7 @@ export function renderDashboardHtml(): string {
         const outCard = document.getElementById('jobOutputCard');
         if (job.output) {
           outCard.style.display = 'block';
-          document.getElementById('jobOutputContent').innerText = job.output;
+          setMarkdownContent(document.getElementById('jobOutputContent'), job.output);
         } else {
           outCard.style.display = 'none';
         }
@@ -1835,7 +2228,7 @@ export function renderDashboardHtml(): string {
                 <strong>\${escapeHtml(m.role.toUpperCase())}</strong>
                 <span>\${formatRelativeTime(m.timestamp)}</span>
               </div>
-              <div class="msg-body">\${escapeHtml(m.content)}</div>
+              <div class="msg-body \${m.role === 'tool' ? '' : 'markdown-body'}">\${renderMessageBodyHtml(m.role, m.content)}</div>
             </div>
           \`).join('');
         }
@@ -1858,7 +2251,7 @@ export function renderDashboardHtml(): string {
       const res = await fetch(\`/api/jobs/\${encodeURIComponent(jobId)}/artifacts/\${encodeURIComponent(name)}\`);
       const data = await res.json();
       document.getElementById('artifactDialogTitle').innerText = '📄 ' + name;
-      document.getElementById('artifactDialogContent').innerText = data.content || '';
+      setMarkdownContent(document.getElementById('artifactDialogContent'), data.content || '');
       document.getElementById('artifactPreviewDialog').showModal();
     }
 
@@ -1929,7 +2322,8 @@ export function renderDashboardHtml(): string {
     }
 
     function copyTextById(id) {
-      const text = document.getElementById(id)?.innerText || '';
+      const el = document.getElementById(id);
+      const text = el?.dataset?.rawMarkdown || el?.innerText || '';
       navigator.clipboard?.writeText(text);
     }
 
@@ -2019,7 +2413,7 @@ export function renderDashboardHtml(): string {
 
             if (typeof ev.data?.accumulatedText === 'string' && ev.data.accumulatedText.length > 0) {
               document.getElementById('sessOutputQuickStart').style.display = 'none';
-              document.getElementById('sessOutputContent').innerText = ev.data.accumulatedText;
+              setMarkdownContent(document.getElementById('sessOutputContent'), ev.data.accumulatedText);
               const outBadgeEl = document.getElementById('sessOutputStateBadge');
               if (ev.data?.stepType === 'turn_complete') {
                 outBadgeEl.className = 'badge badge-completed';
