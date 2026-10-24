@@ -5,6 +5,8 @@ export interface ChatMessage {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   tool_call_id?: string;
+  /** Tool calls the assistant requested in this message (role: 'assistant' only). */
+  tool_calls?: ToolCall[];
 }
 
 /**
@@ -34,6 +36,10 @@ export interface CompletionOptions {
   max_tokens?: number;
   tools?: ToolDefinition[];
   stop?: string[];
+  /** Optional orchestrator session ID for providers that support persistent conversation contexts (e.g. agy --conversation). */
+  sessionId?: string;
+  /** Optional workspace path to mount into CLI providers (e.g. agy --add-dir). */
+  workspacePath?: string;
 }
 
 /**

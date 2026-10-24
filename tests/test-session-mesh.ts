@@ -162,8 +162,130 @@ async function runSessionMeshTests() {
   assert.strictEqual(broadcastResult.broadcast_count, 2);
   console.log(`   ✅ Directive broadcast to ${broadcastResult.broadcast_count} child sessions.\n`);
 
-  // ── Test 9: terminate_session and killAllSessions ───────────────
-  console.log('9️⃣ Testing session termination and emergency shutdown...');
+  // ── Test 9: Model Tiering (fast / balanced / heavy) & Preset Spawning ──
+  console.log('9️⃣ Testing Model Tiering (fast/balanced/heavy) & agent_preset...');
+  providerRegistry.register('agy_claude', mockProvider);
+  const fastResearcher = await sessionManager.invokeSession({
+    agent_preset: 'researcher',
+    tier: 'fast',
+    initial_message: 'Scan README headings quickly',
+    await_response: true,
+    parent_session_id: 'coordinator-session-1',
+  });
+  assert.strictEqual(fastResearcher.tier, 'fast');
+  assert.strictEqual(fastResearcher.model, 'gemini-3.8-flash-lite');
+  assert.ok((fastResearcher.context_tokens_used ?? 0) > 0, 'Should track isolated context tokens used');
+
+  const heavyAuditor = await sessionManager.invokeSession({
+    agent_preset: 'reviewer',
+    tier: 'heavy',
+    initial_message: 'Perform deep architectural review',
+    await_response: true,
+    parent_session_id: 'coordinator-session-1',
+  });
+  assert.strictEqual(heavyAuditor.tier, 'heavy');
+  assert.strictEqual(heavyAuditor.provider, 'agy_claude');
+  assert.strictEqual(heavyAuditor.model, 'claude-sonnet-4-6');
+  console.log('   ✅ Tier routing (fast -> flash-lite, heavy -> claude-sonnet-4-6) and preset spawning verified.\n');
+
+  // ── Test 10: Recursive Sub-Session Spawning (Child spawns Grandchild with new context) ──
+  console.log('🔟 Testing Recursive Sub-Session Spawning (mesh_invoke_session)...');
+  let parentTurn = 0;
+  const recursiveProvider: LLMProvider = {
+    name: 'recursive-mock',
+    async complete(messages: ChatMessage[]) {
+      const last = messages[messages.length - 1];
+      // If this is the child session (LeadArchitect) on its first turn, it spins up a fast grandchild session!
+      if (last.role === 'user' && last.content.includes('Coordinate module scan') && parentTurn === 0) {
+        parentTurn++;
+        return {
+          content: 'Spinning up a fast helper sub-session with its own isolated context window...',
+          tool_calls: [
+            {
+              id: 'call_sub_1',
+              name: 'mesh_invoke_session',
+              arguments: {
+                name: 'FastFileScanner',
+                role: 'Fast File Explorer',
+                tier: 'fast',
+                initial_message: 'Read and summarize 50 files in src/ and return a 1-line digest',
+                await_response: true,
+              },
+            },
+          ],
+          finish_reason: 'tool_calls',
+        };
+      }
+      if (last.role === 'tool') {
+        const subResult = JSON.parse(last.content);
+        return {
+          content: `LeadArchitect synthesized grandchild (${subResult.name}, model=${subResult.model}, depth=${subResult.depth}) result: ${subResult.response}`,
+          finish_reason: 'stop',
+        };
+      }
+      return {
+        content: `Grandchild digested 50 files in isolated context: "${last.content}"`,
+        finish_reason: 'stop',
+      };
+    },
+    async healthCheck() {
+      return true;
+    },
+  };
+  providerRegistry.register('recursive', recursiveProvider);
+
+  const leadSession = await sessionManager.invokeSession({
+    name: 'LeadArchitect',
+    role: 'Principal Architect',
+    provider: 'recursive',
+    tier: 'heavy',
+    initial_message: 'Coordinate module scan using a fast helper session',
+    await_response: true,
+    parent_session_id: 'coordinator-session-1',
+  });
+  assert.ok(leadSession.response?.includes('FastFileScanner'), 'Lead session should receive grandchild response');
+  assert.ok(leadSession.response?.includes('depth=1'), 'Grandchild depth must be 1');
+  console.log('   ✅ Child session autonomously spawned a fast grandchild session in a separate context window.\n');
+
+  // ── Test 11: Parallel Multi-Session Fan-Out & Context Firewall Stats ──
+  console.log('1️⃣1️⃣ Testing invokeSessionsParallel (N x Context Window Multiplication)...');
+  const parallelOut = await sessionManager.invokeSessionsParallel({
+    parent_session_id: 'coordinator-session-1',
+    await_all: true,
+    sessions: [
+      { name: 'WorkerA', tier: 'fast', initial_message: 'Analyze module A in isolated context' },
+      { name: 'WorkerB', tier: 'fast', initial_message: 'Analyze module B in isolated context' },
+      { name: 'WorkerC', tier: 'balanced', initial_message: 'Synthesize API contracts for C' },
+    ],
+  });
+  assert.strictEqual(parallelOut.spawned_count, 3);
+  assert.ok(parallelOut.total_context_tokens_used > 0);
+  assert.ok(parallelOut.results.every((r) => r.status === 'completed'));
+
+  const stats = await sessionManager.getMeshStats();
+  assert.ok(stats.total_isolated_context_tokens > 0);
+  assert.ok(stats.effective_context_multiplier >= 1);
+  console.log(
+    `   ✅ Parallel fan-out complete (${parallelOut.spawned_count} isolated sessions, ${stats.total_isolated_context_tokens} total tokens, ${stats.effective_context_multiplier}x context multiplier).\n`,
+  );
+
+  // ── Test 12: Event-driven waitForInbox ──────────────────────────
+  console.log('1️⃣2️⃣ Testing event-driven waitForInbox...');
+  const waitParent = 'wait-parent-session';
+  void sessionManager.invokeSession({
+    name: 'AsyncDeliverer',
+    tier: 'fast',
+    parent_session_id: waitParent,
+    initial_message: 'Deliver background report',
+    await_response: false,
+  });
+  const waited = await sessionManager.waitForInbox(waitParent, 5000, true);
+  assert.strictEqual(waited.timed_out, false);
+  assert.ok(waited.messages.length >= 1);
+  console.log('   ✅ Event-driven waitForInbox woke immediately on background session completion.\n');
+
+  // ── Test 13: terminate_session and killAllSessions ──────────────
+  console.log('1️⃣3️⃣ Testing session termination and emergency shutdown...');
   await sessionManager.terminateSession(syncSession.session_id);
   const afterTermList = await sessionManager.listSessions();
   const termSession = afterTermList.find((s) => s.id === syncSession.session_id);

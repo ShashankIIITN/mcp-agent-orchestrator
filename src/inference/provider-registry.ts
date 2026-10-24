@@ -2,6 +2,7 @@ import { createLogger } from '../utils/logger.js';
 import type { LLMProvider } from './types.js';
 import { OpenAICompatibleProvider } from './providers/openai-compatible.js';
 import { GeminiProvider } from './providers/gemini-provider.js';
+import { AnthropicProvider } from './providers/anthropic-provider.js';
 import { AgyProvider } from './providers/agy-provider.js';
 
 // Using inline interface to avoid dependency on config/schema.js if it doesn't export InferenceConfig
@@ -44,7 +45,7 @@ export class ProviderRegistry {
             provider = new GeminiProvider(name, apiKey, model);
             break;
           case 'anthropic':
-            provider = new OpenAICompatibleProvider(name, 'https://api.anthropic.com', apiKey, model);
+            provider = new AnthropicProvider(name, apiKey, model, providerConfig.base_url);
             break;
           case 'openai':
             provider = new OpenAICompatibleProvider(name, 'https://api.openai.com', apiKey, model);
@@ -79,7 +80,7 @@ export class ProviderRegistry {
       }
       if (process.env.ANTHROPIC_API_KEY) {
         logger.info('Auto-detected ANTHROPIC_API_KEY in environment. Initialized Anthropic provider.');
-        this.register('anthropic', new OpenAICompatibleProvider('anthropic', 'https://api.anthropic.com', process.env.ANTHROPIC_API_KEY, 'claude-3-7-sonnet-20250219'));
+        this.register('anthropic', new AnthropicProvider('anthropic', process.env.ANTHROPIC_API_KEY, 'claude-3-7-sonnet-20250219'));
       }
 
       // Always ensure local agy is available as default zero-key option

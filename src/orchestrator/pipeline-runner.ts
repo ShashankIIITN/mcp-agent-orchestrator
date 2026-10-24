@@ -4,6 +4,7 @@ import type { PipelineDefinition, PipelineStage, AgentDefinition } from '../conf
 import type { LLMProvider } from '../inference/types.js';
 import type { SubagentTool, ToolContext } from '../builtin-tools/types.js';
 import { AgentRuntime, type AgentConfig } from '../agents/agent-runtime.js';
+import { eventBus, type DashboardEvent } from '../dashboard/events.js';
 
 const logger = createLogger('pipeline-runner');
 
@@ -102,13 +103,19 @@ export class PipelineRunner {
           throw new Error(`Provider "${providerName}" not found for agent "${stage.agent}"`);
         }
 
+        // Honour the agent's declared tool whitelist (empty list = no restriction)
+        const agentTools =
+          agentDef.tools && agentDef.tools.length > 0
+            ? config.tools.filter(t => agentDef.tools.includes(t.name))
+            : config.tools;
+
         const agentConfig: AgentConfig = {
           id: `pipeline-${jobId}-${stage.name}`,
           name: `${stage.agent}-${stage.name}`,
           role: agentDef.role,
           systemPrompt: agentDef.system_prompt ?? `You are a ${agentDef.role}. Complete the assigned task.`,
           provider,
-          tools: config.tools,
+          tools: agentTools,
           maxIterations: config.maxIterationsPerAgent ?? 15,
         };
 
@@ -152,26 +159,55 @@ export class PipelineRunner {
   }
 
   /**
-   * Poll for checkpoint resolution. Returns true if approved.
+   * Wait for checkpoint resolution. Returns true if approved.
+   * Resolves immediately on the in-process event bus; a slow DB poll remains as a
+   * fallback for approvals made by another process sharing the same database.
    */
-  private async waitForCheckpoint(
+  private waitForCheckpoint(
     storage: StorageAdapter,
     checkpointId: string,
     timeoutMs = 3600000, // 1 hour
-    pollIntervalMs = 2000,
+    pollIntervalMs = 10000,
   ): Promise<boolean> {
-    const deadline = Date.now() + timeoutMs;
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      let pollTimer: NodeJS.Timeout | undefined;
+      let deadlineTimer: NodeJS.Timeout | undefined;
 
-    while (Date.now() < deadline) {
-      const checkpoint = await storage.getCheckpoint(checkpointId);
-      if (!checkpoint) return false;
-      if (checkpoint.status === 'approved') return true;
-      if (checkpoint.status === 'rejected') return false;
+      const finish = (result: boolean) => {
+        if (settled) return;
+        settled = true;
+        eventBus.off('event', onEvent);
+        if (pollTimer) clearInterval(pollTimer);
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        resolve(result);
+      };
 
-      await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
-    }
+      const check = async () => {
+        try {
+          const checkpoint = await storage.getCheckpoint(checkpointId);
+          if (!checkpoint) return finish(false);
+          if (checkpoint.status === 'approved') return finish(true);
+          if (checkpoint.status === 'rejected') return finish(false);
+        } catch (err) {
+          logger.warn({ error: err, checkpointId }, 'Checkpoint status check failed');
+        }
+      };
 
-    logger.warn({ checkpointId }, 'Checkpoint timed out');
-    return false;
+      const onEvent = (ev: DashboardEvent) => {
+        if (ev.type === 'checkpoint_resolved' && ev.data.checkpointId === checkpointId) {
+          void check();
+        }
+      };
+
+      eventBus.on('event', onEvent);
+      pollTimer = setInterval(() => void check(), pollIntervalMs);
+      deadlineTimer = setTimeout(() => {
+        logger.warn({ checkpointId }, 'Checkpoint timed out');
+        finish(false);
+      }, timeoutMs);
+
+      void check(); // already resolved before we subscribed?
+    });
   }
 }

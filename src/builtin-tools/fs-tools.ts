@@ -2,16 +2,15 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import type { SubagentTool, ToolContext, ToolResult } from './types.js';
 import { createLogger } from '../utils/logger.js';
+import { validateWorkspacePath } from '../utils/path-utils.js';
 
 const logger = createLogger('fs-tools');
 
-function validatePath(targetPath: string, workspacePath: string): string {
-  const resolvedPath = path.resolve(workspacePath, targetPath);
-  if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-    throw new Error(`Path ${targetPath} is outside of workspace ${workspacePath}`);
-  }
-  return resolvedPath;
-}
+// Cross-platform (Linux/macOS/Windows) containment check with symlink + `~` handling
+const validatePath = validateWorkspacePath;
+
+// Cap file reads so a huge file can't blow up an agent's context or the transcript DB
+const MAX_READ_BYTES = 512 * 1024;
 
 export const fsTools: SubagentTool[] = [
   {
@@ -28,6 +27,21 @@ export const fsTools: SubagentTool[] = [
       try {
         const filePath = args.path as string;
         const resolvedPath = validatePath(filePath, context.workspace_path);
+        const stat = await fs.stat(resolvedPath);
+        if (stat.size > MAX_READ_BYTES) {
+          const handle = await fs.open(resolvedPath, 'r');
+          try {
+            const buf = Buffer.alloc(MAX_READ_BYTES);
+            const { bytesRead } = await handle.read(buf, 0, MAX_READ_BYTES, 0);
+            return {
+              success: true,
+              output: buf.subarray(0, bytesRead).toString('utf8') +
+                `\n\n[truncated: file is ${stat.size} bytes, showing first ${MAX_READ_BYTES}]`
+            };
+          } finally {
+            await handle.close();
+          }
+        }
         const content = await fs.readFile(resolvedPath, 'utf8');
         return { success: true, output: content };
       } catch (error: any) {

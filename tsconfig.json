@@ -1,4 +1,4 @@
-﻿{
+{
   "compilerOptions": {
     "target": "ES2022",
     "module": "Node16",
@@ -9,7 +9,8 @@
     "declaration": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "resolveJsonModule": true
+    "resolveJsonModule": true,
+    "newLine": "lf"
   },
   "include": ["src/**/*"]
 }

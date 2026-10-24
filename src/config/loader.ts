@@ -9,7 +9,8 @@ const logger = createLogger('config-loader');
 
 /**
  * Automatically discover custom specialist agents configured on the system
- * in ~/.gemini/config/agents and ./.agents/agents.
+ * in ~/.gemini/config/agents, $XDG_CONFIG_HOME/gemini/agents (Linux/macOS),
+ * and ./.agents/agents.
  */
 function discoverSystemAgents(): Record<string, AgentDefinition> {
   const discovered: Record<string, AgentDefinition> = {};
@@ -17,6 +18,9 @@ function discoverSystemAgents(): Record<string, AgentDefinition> {
     join(homedir(), '.gemini', 'config', 'agents'),
     resolve('./.agents/agents'),
   ];
+  if (process.env.XDG_CONFIG_HOME) {
+    searchRoots.splice(1, 0, join(process.env.XDG_CONFIG_HOME, 'gemini', 'agents'));
+  }
 
   for (const root of searchRoots) {
     if (!existsSync(root)) continue;
@@ -151,6 +155,27 @@ export function loadConfig(filePath?: string): OrchestratorConfig {
 
   if (discoveredCount > 0) {
     logger.info({ count: discoveredCount }, 'Auto-discovered system specialist agents');
+  }
+
+  // Ensure every agent referenced by a pipeline stage exists in config.agents,
+  // auto-provisioning a sensible specialist persona on machines without custom agent files.
+  const defaultProviderKey = Object.keys(config.inference.providers)[0] || 'agy';
+  for (const [pipelineName, pipeline] of Object.entries(config.pipelines)) {
+    for (const stage of pipeline.stages) {
+      if (!config.agents[stage.agent]) {
+        const lower = stage.agent.toLowerCase();
+        const isReviewer = lower.includes('reviewer') || lower.includes('auditor');
+        config.agents[stage.agent] = {
+          role: `Specialist (${stage.agent})`,
+          provider: defaultProviderKey,
+          system_prompt: `You are ${stage.agent}, a specialist agent executing stage "${stage.name}" of pipeline "${pipelineName}". Complete the stage thoroughly.`,
+          tools: isReviewer
+            ? ['fs_read', 'fs_list', 'shell_exec']
+            : ['fs_read', 'fs_write', 'fs_list', 'shell_exec', 'web_fetch'],
+        };
+        logger.debug({ agent: stage.agent, pipeline: pipelineName }, 'Auto-provisioned fallback pipeline agent');
+      }
+    }
   }
 
   logger.info(

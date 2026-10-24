@@ -200,10 +200,10 @@ export function renderDashboardHtml(): string {
       container.innerHTML = jobs.map(j => \`
         <div class="job-card \${j.id === activeJobId ? 'active' : ''}" onclick="selectJob('\${j.id}')">
           <div class="job-card-top">
-            <span class="job-mode">\${j.mode}</span>
-            <span class="badge badge-\${j.status}">\${j.status}</span>
+            <span class="job-mode">\${escapeHtml(j.mode)}</span>
+            <span class="badge badge-\${escapeHtml(j.status)}">\${escapeHtml(j.status)}</span>
           </div>
-          <div class="job-goal" title="\${j.goal}">\${j.goal}</div>
+          <div class="job-goal" title="\${escapeHtml(j.goal)}">\${escapeHtml(j.goal)}</div>
           <div class="job-time">\${new Date(j.created_at).toLocaleTimeString()} - \${Math.round(j.progress)}%</div>
         </div>
       \`).join('');
@@ -264,10 +264,10 @@ export function renderDashboardHtml(): string {
           cpBox.innerHTML = \`
             <div class="checkpoint-banner">
               <div class="checkpoint-header">
-                <strong style="color: var(--warning);">⚠️ Human Approval Required: \${cp.stage_name}</strong>
+                <strong style="color: var(--warning);">⚠️ Human Approval Required: \${escapeHtml(cp.stage_name)}</strong>
                 <span class="badge badge-waiting_approval">Checkpoint Pending</span>
               </div>
-              <div class="checkpoint-desc">\${cp.action_description}</div>
+              <div class="checkpoint-desc">\${escapeHtml(cp.action_description)}</div>
               <div class="checkpoint-actions">
                 <input type="text" id="cpFeedback" class="checkpoint-input" placeholder="Optional reviewer feedback..." />
                 <button class="btn btn-primary" onclick="resolveCheckpoint('\${cp.id}', 'approve')">✓ Approve</button>
@@ -304,8 +304,8 @@ export function renderDashboardHtml(): string {
         if (arts.length > 0) {
           artsCard.style.display = 'block';
           document.getElementById('artifactsGrid').innerHTML = arts.map(a => \`
-            <div class="artifact-card" onclick="viewArtifact('\${id}', '\${a.name}')">
-              <strong>📄 \${a.name}</strong>
+            <div class="artifact-card" data-name="\${escapeHtml(a.name)}" onclick="viewArtifact('\${escapeHtml(id)}', this.dataset.name)">
+              <strong>📄 \${escapeHtml(a.name)}</strong>
               <div style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.25rem;">\${new Date(a.created_at).toLocaleTimeString()}</div>
             </div>
           \`).join('');
@@ -339,13 +339,27 @@ export function renderDashboardHtml(): string {
     }
 
     function escapeHtml(text) {
-      const div = document.createElement('div');
-      div.innerText = text;
-      return div.innerHTML;
+      return String(text === null || text === undefined ? '' : text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    // Optional auth: open the dashboard as /?token=SECRET when DASHBOARD_TOKEN is set
+    const DASHBOARD_TOKEN = new URLSearchParams(window.location.search).get('token');
+    if (DASHBOARD_TOKEN) {
+      const nativeFetch = window.fetch.bind(window);
+      window.fetch = (input, init = {}) => {
+        const headers = new Headers(init.headers || {});
+        headers.set('x-dashboard-token', DASHBOARD_TOKEN);
+        return nativeFetch(input, { ...init, headers });
+      };
     }
 
     // Connect to Server-Sent Events for real-time live updates
-    const sse = new EventSource('/api/events');
+    const sse = new EventSource('/api/events' + (DASHBOARD_TOKEN ? '?token=' + encodeURIComponent(DASHBOARD_TOKEN) : ''));
     sse.onmessage = (e) => {
       try {
         const ev = JSON.parse(e.data);

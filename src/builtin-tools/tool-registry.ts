@@ -17,6 +17,17 @@ export class BuiltinToolRegistry {
     return this.tools.get(name);
   }
 
+  /**
+   * Register an additional tool (e.g. a tool bridged from an external MCP server).
+   */
+  register(tool: SubagentTool): void {
+    this.tools.set(tool.name, tool);
+  }
+
+  unregister(name: string): boolean {
+    return this.tools.delete(name);
+  }
+
   getOrThrow(name: string): SubagentTool {
     const tool = this.tools.get(name);
     if (!tool) {

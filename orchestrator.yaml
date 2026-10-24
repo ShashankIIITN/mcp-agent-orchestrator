@@ -9,11 +9,23 @@ server:
     default_safety_mode: "semi-autonomous" # autonomous | semi-autonomous | safe
     allowed_workspaces:
       - "./"
-      - "D:/"
+      - "~"      # home directory (Linux/macOS/Windows)
+      - "D:/"    # Windows drive roots are ignored on Linux/macOS
       - "C:/"
 
 inference:
   default_provider: "direct"
+  # Cost & capability tiers for child sessions (fast = cheap exploration, balanced = coding, heavy = deep reasoning)
+  tiers:
+    fast:
+      provider: "agy"
+      model: "gemini-3.8-flash-lite"
+    balanced:
+      provider: "agy"
+      model: "gemini-3.8-flash-high"
+    heavy:
+      provider: "agy_claude"
+      model: "claude-sonnet-4-6"
   providers:
     # Uses your local authenticated Antigravity installation — NO API KEYS NEEDED!
     agy:

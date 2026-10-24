@@ -26,6 +26,10 @@ export interface AgentState {
   iterations: number;
   lastError?: string;
   model?: string;
+  /** Total tokens processed across all turns in this isolated context window */
+  contextTokensUsed: number;
+  /** Tokens absorbed inside this isolated context window that did NOT bloat the parent session */
+  contextFirewallSavedTokens: number;
 }
 
 export class AgentRuntime {
@@ -35,6 +39,8 @@ export class AgentRuntime {
   private totalToolCalls = 0;
   private iterations = 0;
   private lastError?: string;
+  private contextTokensUsed = 0;
+  private finalOutputTokens = 0;
 
   constructor(config: AgentConfig) {
     this.config = config;
@@ -77,6 +83,8 @@ export class AgentRuntime {
       const options: CompletionOptions = {
         tools: toolDefs.length > 0 ? toolDefs : undefined,
         model: this.config.model,
+        sessionId: this.config.id,
+        workspacePath: context.workspace_path,
       };
 
       for (let i = 0; i < this.config.maxIterations; i++) {
@@ -85,9 +93,19 @@ export class AgentRuntime {
 
         const response = await this.config.provider.complete(this.messages, options);
 
+        // Track token usage across this isolated context window
+        if (response.usage?.total_tokens) {
+          this.contextTokensUsed += response.usage.total_tokens;
+        } else {
+          const promptChars = this.messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
+          const completionChars = response.content?.length ?? 0;
+          this.contextTokensUsed += Math.ceil((promptChars + completionChars) / 4);
+        }
+
         // If no tool calls, we have our final answer
         if (!response.tool_calls || response.tool_calls.length === 0) {
           this.messages.push({ role: 'assistant', content: response.content });
+          this.finalOutputTokens += Math.ceil((response.content?.length ?? 0) / 4);
 
           if (storage && jobId) {
             await storage.saveAgentMessage(jobId, this.config.id, {
@@ -105,6 +123,7 @@ export class AgentRuntime {
         this.messages.push({
           role: 'assistant',
           content: response.content || `Calling ${response.tool_calls.length} tool(s)...`,
+          tool_calls: response.tool_calls,
         });
 
         for (const toolCall of response.tool_calls) {
@@ -158,6 +177,7 @@ export class AgentRuntime {
   }
 
   getState(): AgentState {
+    const saved = Math.max(0, this.contextTokensUsed - this.finalOutputTokens);
     return {
       id: this.config.id,
       name: this.config.name,
@@ -168,6 +188,8 @@ export class AgentRuntime {
       iterations: this.iterations,
       lastError: this.lastError,
       model: this.config.model,
+      contextTokensUsed: this.contextTokensUsed,
+      contextFirewallSavedTokens: saved,
     };
   }
 
@@ -187,11 +209,23 @@ export class AgentRuntime {
     return this.messages.length;
   }
 
+  /**
+   * Restore prior conversation history (e.g. when resurrecting a persisted session from SQLite).
+   */
+  loadMessages(history: ChatMessage[]): void {
+    this.messages = [
+      { role: 'system', content: this.config.systemPrompt },
+      ...history.filter(m => m.role !== 'system'),
+    ];
+  }
+
   reset(): void {
     this.messages = [{ role: 'system', content: this.config.systemPrompt }];
     this.status = 'idle';
     this.totalToolCalls = 0;
     this.iterations = 0;
     this.lastError = undefined;
+    this.contextTokensUsed = 0;
+    this.finalOutputTokens = 0;
   }
 }

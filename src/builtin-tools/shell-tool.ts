@@ -1,19 +1,16 @@
-import { execFile } from 'node:child_process';
+import { exec } from 'node:child_process';
 import { promisify } from 'node:util';
-import path from 'node:path';
 import type { SubagentTool, ToolContext, ToolResult } from './types.js';
 import { createLogger } from '../utils/logger.js';
+import { validateWorkspacePath, resolveCrossPlatformPath } from '../utils/path-utils.js';
+import { findDangerousCommand } from '../utils/command-guard.js';
 
-const execFileAsync = promisify(execFile);
+// `exec` runs the command string through the platform shell
+// (/bin/sh on Linux/macOS, cmd.exe on Windows).
+const execAsync = promisify(exec);
 const logger = createLogger('shell-tool');
 
-function validatePath(targetPath: string, workspacePath: string): string {
-  const resolvedPath = path.resolve(workspacePath, targetPath);
-  if (!resolvedPath.startsWith(path.resolve(workspacePath))) {
-    throw new Error(`Path ${targetPath} is outside of workspace ${workspacePath}`);
-  }
-  return resolvedPath;
-}
+const validatePath = validateWorkspacePath;
 
 export const shellTool: SubagentTool = {
   name: 'shell_exec',
@@ -34,12 +31,28 @@ export const shellTool: SubagentTool = {
       }
 
       const command = args.command as string;
+      if (typeof command !== 'string' || command.trim() === '') {
+        return { success: false, output: '', error: 'command must be a non-empty string' };
+      }
+
+      if (context.safety_mode !== 'autonomous') {
+        const danger = findDangerousCommand(command);
+        if (danger) {
+          logger.warn(`Blocked dangerous command from agent ${context.agent_id} (${danger}): ${command}`);
+          return {
+            success: false,
+            output: '',
+            error: `Blocked: command matches a dangerous pattern (${danger}). Use autonomous mode if this is intended.`
+          };
+        }
+      }
+
       if (context.safety_mode === 'semi-autonomous') {
         logger.warn(`Agent ${context.agent_id} in job ${context.job_id} is executing shell command: ${command}`);
       }
 
       const cwdArg = args.cwd as string | undefined;
-      let cwd = context.workspace_path;
+      let cwd = resolveCrossPlatformPath(context.workspace_path);
       if (cwdArg) {
         cwd = validatePath(cwdArg, context.workspace_path);
       }
@@ -49,10 +62,11 @@ export const shellTool: SubagentTool = {
         timeoutArg = 300000;
       }
 
-      const { stdout, stderr } = await execFileAsync(command, {
+      const { stdout, stderr } = await execAsync(command, {
         cwd,
         timeout: timeoutArg,
-        shell: true
+        windowsHide: true,
+        maxBuffer: 10 * 1024 * 1024
       });
 
       return {

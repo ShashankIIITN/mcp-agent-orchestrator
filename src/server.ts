@@ -15,6 +15,8 @@ import { registerSessionMeshTools } from './tools/session-mesh-tools.js';
 import { SessionManager } from './sessions/session-manager.js';
 import { DashboardServer } from './dashboard/server.js';
 import { dirname, resolve, isAbsolute } from 'node:path';
+import { expandHome } from './utils/path-utils.js';
+import { VERSION } from './version.js';
 import type { OrchestratorConfig } from './config/schema.js';
 
 const logger = createLogger('orchestrator-server');
@@ -33,9 +35,10 @@ export class OrchestratorServer {
   constructor(configPath?: string) {
     this.config = loadConfig(configPath);
     const basePath = configPath ? dirname(resolve(configPath)) : process.cwd();
-    const dbPath = isAbsolute(this.config.server.storage.connection_string)
-      ? this.config.server.storage.connection_string
-      : resolve(basePath, this.config.server.storage.connection_string);
+    const connectionString = expandHome(this.config.server.storage.connection_string);
+    const dbPath = isAbsolute(connectionString)
+      ? connectionString
+      : resolve(basePath, connectionString);
     this.storage = new SqliteStorageAdapter(dbPath);
 
     this.providerRegistry = new ProviderRegistry();
@@ -68,7 +71,7 @@ export class OrchestratorServer {
 
     this.mcpServer = new McpServer({
       name: 'mcp-agent-orchestrator',
-      version: '0.2.0',
+      version: VERSION,
     });
 
     this.registerTools();
@@ -216,6 +219,40 @@ export class OrchestratorServer {
 
   // ── Lifecycle ──────────────────────────────────────────────────
 
+  /**
+   * Expose tools discovered on external MCP gateways to subagents.
+   * Names are sanitized to `mcp__<server>__<tool>` because LLM function-calling
+   * APIs only accept [a-zA-Z0-9_-] in tool names.
+   */
+  private registerGatewayTools(): void {
+    const sanitize = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '_');
+    let count = 0;
+
+    for (const remote of this.mcpClientManager.getAllTools()) {
+      const name = `mcp__${sanitize(remote.serverName)}__${sanitize(remote.originalName)}`.slice(0, 64);
+      this.toolRegistry.register({
+        name,
+        description: `[${remote.serverName}] ${remote.description}`,
+        parameters: remote.inputSchema,
+        execute: async (args, context) => {
+          if (context.safety_mode === 'safe') {
+            return { success: false, output: '', error: 'Blocked: external MCP tools are not allowed in safe mode.' };
+          }
+          const result = await this.mcpClientManager.callTool(remote.qualifiedName, args);
+          return {
+            success: result.success && !result.isError,
+            output: result.content,
+            error: result.success && !result.isError ? undefined : result.content,
+          };
+        },
+      });
+      count++;
+    }
+
+    if (count > 0) logger.info({ count }, 'Registered external MCP gateway tools for subagents');
+  }
+
+
   async start(): Promise<void> {
     await this.storage.init();
     logger.info('Storage initialized');
@@ -223,6 +260,7 @@ export class OrchestratorServer {
     if (Object.keys(this.config.mcp_gateways).length > 0) {
       logger.info('Connecting to configured external MCP gateways...');
       await this.mcpClientManager.connectAll(this.config.mcp_gateways);
+      this.registerGatewayTools();
     }
 
     try {

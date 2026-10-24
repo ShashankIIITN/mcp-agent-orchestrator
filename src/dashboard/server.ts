@@ -48,7 +48,7 @@ export class DashboardServer {
         }
       });
 
-      this.server.listen(this.port, () => {
+      this.server.listen(this.port, '127.0.0.1', () => {
         logger.info({ port: this.port }, `Web Dashboard running at http://localhost:${this.port}`);
         resolve();
       });
@@ -76,15 +76,39 @@ export class DashboardServer {
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
-    // CORS headers
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    // ── Access control ───────────────────────────────────────────────
+    // 1. Host check defends against DNS-rebinding attacks from web pages.
+    if (!this.isAllowedHost(req.headers.host)) {
+      this.sendJson(res, 403, { error: 'Forbidden: invalid Host header' });
+      return;
+    }
+
+    // 2. Origin check blocks cross-site requests (e.g. a malicious page POSTing
+    //    to /api/checkpoints/:id/resolve). No wildcard CORS is emitted: the
+    //    dashboard UI is same-origin.
+    const origin = req.headers.origin;
+    if (origin && !this.isAllowedOrigin(origin)) {
+      this.sendJson(res, 403, { error: 'Forbidden: cross-origin request blocked' });
+      return;
+    }
 
     if (method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
       return;
+    }
+
+    // 3. Optional shared-secret token (set DASHBOARD_TOKEN). Open the UI as
+    //    http://localhost:PORT/?token=SECRET. EventSource can't set headers, so
+    //    the token is also accepted as a query parameter.
+    const requiredToken = process.env.DASHBOARD_TOKEN;
+    if (requiredToken && pathname.startsWith('/api/')) {
+      const provided =
+        (req.headers['x-dashboard-token'] as string | undefined) ?? url.searchParams.get('token');
+      if (provided !== requiredToken) {
+        this.sendJson(res, 401, { error: 'Unauthorized: missing or invalid dashboard token' });
+        return;
+      }
     }
 
     // ── Static Dashboard UI ──────────────────────────────────────────
@@ -201,7 +225,8 @@ export class DashboardServer {
       const sessions = this.sessionManager
         ? await this.sessionManager.listSessions()
         : await this.storage.listSessions();
-      this.sendJson(res, 200, { sessions });
+      const mesh_stats = this.sessionManager ? await this.sessionManager.getMeshStats() : undefined;
+      this.sendJson(res, 200, { sessions, mesh_stats });
       return;
     }
 
@@ -239,16 +264,40 @@ export class DashboardServer {
     this.sendJson(res, 404, { error: 'Not found' });
   }
 
+  private isAllowedHost(hostHeader: string | undefined): boolean {
+    if (!hostHeader) return false;
+    const host = hostHeader.replace(/:\d+$/, '').replace(/^\[|\]$/g, '').toLowerCase();
+    return host === 'localhost' || host === '127.0.0.1' || host === '::1';
+  }
+
+  private isAllowedOrigin(origin: string): boolean {
+    try {
+      const u = new URL(origin);
+      return (
+        (u.protocol === 'http:' || u.protocol === 'https:') &&
+        this.isAllowedHost(u.host) &&
+        Number(u.port || (u.protocol === 'https:' ? 443 : 80)) === this.port
+      );
+    } catch {
+      return false;
+    }
+  }
+
   private sendJson(res: ServerResponse, status: number, data: unknown): void {
     res.writeHead(status, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify(data));
   }
 
   private async readJsonBody(req: IncomingMessage): Promise<Record<string, unknown>> {
+    const MAX_BODY = 1024 * 1024;
     return new Promise((resolve, reject) => {
       let body = '';
       req.on('data', (chunk) => {
         body += chunk;
+        if (body.length > MAX_BODY) {
+          reject(new Error('Request body too large'));
+          req.destroy();
+        }
       });
       req.on('end', () => {
         try {

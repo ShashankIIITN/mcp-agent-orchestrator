@@ -1,0 +1,4 @@
+# Force LF so the `#!/usr/bin/env node` shebang works on Linux/macOS
+* text=auto eol=lf
+*.png binary
+*.db binary

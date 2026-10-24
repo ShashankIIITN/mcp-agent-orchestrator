@@ -1,0 +1,17 @@
+version: "1.0"
+
+server:
+  port: 4017
+  storage:
+    type: "sqlite"
+    connection_string: "./e2e.db"
+  security:
+    default_safety_mode: "safe"
+    allowed_workspaces: ["./"]
+
+inference:
+  default_provider: "direct"
+  providers:
+    agy:
+      type: "agy"
+      model: "gemini-3.8-flash-high"

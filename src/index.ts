@@ -5,10 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { OrchestratorServer } from './server.js';
 import { createLogger } from './utils/logger.js';
 import { loadConfig } from './config/loader.js';
-import { findAgyBinaryPath } from './inference/providers/agy-provider.js';
+import { findAgyBinaryPath, isAgyAvailable } from './inference/providers/agy-provider.js';
+import { VERSION } from './version.js';
 
 const logger = createLogger('main');
-const VERSION = '0.2.0';
 
 async function main() {
   const arg = process.argv[2];
@@ -119,7 +119,7 @@ pipelines:
     console.log(`   Platform         : ${process.platform} (${process.arch})`);
 
     const agyBin = findAgyBinaryPath();
-    const agyAvailable = existsSync(agyBin);
+    const agyAvailable = isAgyAvailable(agyBin);
     console.log(`   Local agy binary : ${agyAvailable ? `Available (${agyBin})` : 'Not found (optional)'}`);
 
     const hasGeminiKey = Boolean(process.env.GEMINI_API_KEY);
@@ -136,6 +136,7 @@ pipelines:
       console.log(`\n✅ System is healthy and ready for multi-agent orchestration!\n`);
     } catch (err) {
       console.error(`\n❌ Configuration issue:`, err);
+      process.exit(1);
     }
     process.exit(0);
   }

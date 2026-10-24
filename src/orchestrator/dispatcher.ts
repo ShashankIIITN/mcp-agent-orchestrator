@@ -69,6 +69,13 @@ export class Dispatcher {
     for (const name of providerNames) {
       workerProviders.set(name, this.providerRegistry.getOrThrow(name));
     }
+    // The supervisor asks for workers by role (e.g. "coder"), so also key by agent
+    // definition name, resolving each agent's configured provider.
+    for (const [agentName, def] of Object.entries(this.config.agents)) {
+      if (!def.provider) continue;
+      const provider = this.providerRegistry.get(def.provider);
+      if (provider) workerProviders.set(agentName, provider);
+    }
 
     const swarmConfig: SwarmConfig = {
       jobId,

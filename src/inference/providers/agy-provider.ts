@@ -1,8 +1,9 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, delimiter, isAbsolute } from 'node:path';
 import { createLogger } from '../../utils/logger.js';
+import { expandHome } from '../../utils/path-utils.js';
 import type {
   LLMProvider,
   ChatMessage,
@@ -19,36 +20,96 @@ export interface AgyProviderOptions {
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 }
 
+interface AgyRawToolCall {
+  id?: string;
+  name: string;
+  arguments?: Record<string, unknown>;
+}
+
+interface AgyCliResponse {
+  conversation_id?: string;
+  status?: string;
+  response?: string;
+  usage?: {
+    input_tokens?: number;
+    output_tokens?: number;
+    total_tokens?: number;
+  };
+}
+
 /**
- * Cross-platform discovery for the agy CLI binary.
+ * Search the system PATH for an executable, honouring the platform's path
+ * delimiter (`:` on Linux/macOS, `;` on Windows). On Windows only real
+ * executables (.exe) are considered, since `.cmd`/`.bat` shims cannot be
+ * spawned safely without a shell.
+ */
+function searchPath(binaryName: string): string | undefined {
+  const pathDirs = (process.env.PATH || process.env.Path || '')
+    .split(delimiter)
+    .filter(Boolean);
+  const exts = process.platform === 'win32' ? ['', '.exe'] : [''];
+
+  for (const dir of pathDirs) {
+    for (const ext of exts) {
+      const candidate = join(dir, binaryName + ext);
+      if (existsSync(candidate)) return candidate;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Cross-platform discovery for the agy CLI binary (Windows, macOS, Linux).
  */
 export function findAgyBinaryPath(customPath?: string): string {
-  if (customPath && existsSync(customPath)) {
-    return customPath;
+  if (customPath) {
+    const expanded = expandHome(customPath);
+    if (existsSync(expanded)) return expanded;
   }
-  if (process.env.AGY_BIN_PATH && existsSync(process.env.AGY_BIN_PATH)) {
-    return process.env.AGY_BIN_PATH;
+  if (process.env.AGY_BIN_PATH) {
+    const expanded = expandHome(process.env.AGY_BIN_PATH);
+    if (existsSync(expanded)) return expanded;
   }
 
-  // Windows standard paths
+  // Anything on the system PATH wins (covers Homebrew, snap, npm global, etc.)
+  const onPath = searchPath('agy');
+  if (onPath) return onPath;
+
+  const candidates: string[] = [];
+
   if (process.platform === 'win32') {
     const localAppData = process.env.LOCALAPPDATA || join(homedir(), 'AppData', 'Local');
-    const winPath = join(localAppData, 'agy', 'bin', 'agy.exe');
-    if (existsSync(winPath)) return winPath;
+    candidates.push(join(localAppData, 'agy', 'bin', 'agy.exe'));
+  } else {
+    if (process.platform === 'darwin') {
+      candidates.push('/opt/homebrew/bin/agy'); // Apple Silicon Homebrew
+    }
+    candidates.push(
+      join(homedir(), '.local', 'bin', 'agy'),
+      join(homedir(), '.gemini', 'antigravity-cli', 'bin', 'agy'),
+      join(homedir(), '.antigravity', 'bin', 'agy'),
+      '/usr/local/bin/agy',
+      '/usr/bin/agy',
+      '/snap/bin/agy',
+    );
   }
 
-  // Unix / macOS paths
-  const unixPaths = [
-    join(homedir(), '.local', 'bin', 'agy'),
-    join(homedir(), '.gemini', 'antigravity-cli', 'bin', 'agy'),
-    '/usr/local/bin/agy',
-    '/usr/bin/agy',
-  ];
-  for (const p of unixPaths) {
+  for (const p of candidates) {
     if (existsSync(p)) return p;
   }
 
-  return 'agy'; // Try system PATH
+  return 'agy'; // Last resort: let the OS try to resolve it
+}
+
+/**
+ * Whether the agy binary can actually be located. Unlike a bare `existsSync`,
+ * this also resolves bare command names via the system PATH.
+ */
+export function isAgyAvailable(binaryPath: string = findAgyBinaryPath()): boolean {
+  if (isAbsolute(binaryPath) || binaryPath.includes('/') || binaryPath.includes('\\')) {
+    return existsSync(binaryPath);
+  }
+  return searchPath(binaryPath) !== undefined;
 }
 
 export class AgyProvider implements LLMProvider {
@@ -56,6 +117,7 @@ export class AgyProvider implements LLMProvider {
   private readonly binaryPath: string;
   private readonly defaultModel: string;
   private readonly effort: string;
+  private readonly sessionConversations = new Map<string, string>();
 
   constructor(name = 'agy', options?: AgyProviderOptions) {
     this.name = name;
@@ -64,16 +126,60 @@ export class AgyProvider implements LLMProvider {
     this.effort = options?.effort || 'medium';
   }
 
+  private normalizeModelName(model: string): string {
+    const trimmed = model.trim();
+    if (trimmed === 'gemini-3.8-flash-lite') {
+      return 'gemini-3.8-flash-low';
+    }
+    return trimmed;
+  }
+
   async complete(
     messages: ChatMessage[],
     options?: CompletionOptions,
   ): Promise<CompletionResponse> {
-    const model = options?.model || this.defaultModel;
-    const prompt = this.formatPrompt(messages, options);
+    const requestedModel = this.normalizeModelName(options?.model || this.defaultModel);
+    const existingConversationId = options?.sessionId
+      ? this.sessionConversations.get(options.sessionId)
+      : undefined;
+
+    const lastMsg = messages[messages.length - 1];
+    const prompt = existingConversationId && lastMsg
+      ? lastMsg.role === 'tool'
+        ? `[TOOL RESULT${lastMsg.tool_call_id ? ` id=${lastMsg.tool_call_id}` : ''}]: ${lastMsg.content}`
+        : lastMsg.content
+      : this.formatPrompt(messages, options);
 
     try {
-      logger.debug({ model, messagesCount: messages.length }, 'Executing agy completion');
-      const outputJson = await this.execAgy(prompt, model);
+      logger.debug(
+        { model: requestedModel, messagesCount: messages.length, resumedConversation: Boolean(existingConversationId) },
+        'Executing agy completion',
+      );
+      let outputJson: AgyCliResponse;
+      try {
+        outputJson = await this.execAgy(prompt, requestedModel, existingConversationId, options?.workspacePath);
+      } catch (primaryErr) {
+        const errText = primaryErr instanceof Error ? primaryErr.message : String(primaryErr);
+        // Automatic quota / model availability fallback to gemini-3.8-flash-high
+        if (
+          requestedModel !== 'gemini-3.8-flash-high' &&
+          (errText.includes('RESOURCE_EXHAUSTED') ||
+            errText.includes('Individual quota reached') ||
+            errText.includes('is not recognized as a known model'))
+        ) {
+          logger.warn(
+            { requestedModel, fallbackModel: 'gemini-3.8-flash-high' },
+            'Primary model quota exhausted or unrecognized; falling back to gemini-3.8-flash-high',
+          );
+          outputJson = await this.execAgy(prompt, 'gemini-3.8-flash-high', existingConversationId, options?.workspacePath);
+        } else {
+          throw primaryErr;
+        }
+      }
+
+      if (options?.sessionId && outputJson.conversation_id) {
+        this.sessionConversations.set(options.sessionId, outputJson.conversation_id);
+      }
 
       if (outputJson.status !== 'SUCCESS') {
         logger.error({ status: outputJson.status }, 'agy completion returned non-success');
@@ -108,7 +214,7 @@ export class AgyProvider implements LLMProvider {
   }
 
   async healthCheck(): Promise<boolean> {
-    return existsSync(this.binaryPath);
+    return isAgyAvailable(this.binaryPath);
   }
 
   private formatPrompt(messages: ChatMessage[], options?: CompletionOptions): string {
@@ -145,9 +251,9 @@ export class AgyProvider implements LLMProvider {
 
     try {
       if (candidate.startsWith('{') && candidate.endsWith('}')) {
-        const parsed = JSON.parse(candidate);
+        const parsed = JSON.parse(candidate) as { tool_calls?: AgyRawToolCall[] };
         if (Array.isArray(parsed.tool_calls) && parsed.tool_calls.length > 0) {
-          return parsed.tool_calls.map((tc: any, idx: number) => ({
+          return parsed.tool_calls.map((tc, idx) => ({
             id: tc.id || `call_${Date.now()}_${idx}`,
             name: tc.name,
             arguments: tc.arguments || {},
@@ -161,7 +267,13 @@ export class AgyProvider implements LLMProvider {
     return undefined;
   }
 
-  private execAgy(prompt: string, model: string, timeoutMs = 180000): Promise<any> {
+  private execAgy(
+    prompt: string,
+    model: string,
+    conversationId?: string,
+    workspacePath?: string,
+    timeoutMs = 180000,
+  ): Promise<AgyCliResponse> {
     return new Promise((resolve, reject) => {
       const args = [
         '-p',
@@ -173,7 +285,22 @@ export class AgyProvider implements LLMProvider {
         '--dangerously-skip-permissions',
       ];
 
-      if (this.effort && !model.includes('-low') && !model.includes('-medium') && !model.includes('-high')) {
+      if (conversationId) {
+        args.push('--conversation', conversationId);
+      }
+
+      if (workspacePath && existsSync(workspacePath)) {
+        args.push('--add-dir', workspacePath);
+      }
+
+      const hasEmbeddedEffort =
+        model.includes('-low') ||
+        model.includes('-medium') ||
+        model.includes('-high') ||
+        model.includes('-lite') ||
+        /\((low|medium|high)\)/i.test(model);
+
+      if (this.effort && !hasEmbeddedEffort) {
         args.push('--effort', this.effort);
       }
 

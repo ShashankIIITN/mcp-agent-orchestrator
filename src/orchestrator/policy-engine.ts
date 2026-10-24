@@ -1,5 +1,5 @@
-import { resolve } from 'node:path';
 import { createLogger } from '../utils/logger.js';
+import { isPathInside } from '../utils/path-utils.js';
 import type { SecurityConfig, SafetyMode } from '../config/schema.js';
 
 const logger = createLogger('policy-engine');
@@ -9,13 +9,11 @@ export class PolicyEngine {
 
   /**
    * Check if a given path is within the allowed workspaces.
+   * Works on Linux, macOS and Windows (supports `~`, symlinks, and ignores
+   * Windows drive-letter entries like "D:/" when running on Unix).
    */
   isPathAllowed(targetPath: string): boolean {
-    const resolved = resolve(targetPath);
-    return this.securityConfig.allowed_workspaces.some(ws => {
-      const resolvedWs = resolve(ws);
-      return resolved.startsWith(resolvedWs);
-    });
+    return this.securityConfig.allowed_workspaces.some(ws => isPathInside(targetPath, ws));
   }
 
   /**

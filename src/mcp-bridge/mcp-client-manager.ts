@@ -3,6 +3,7 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { createLogger } from '../utils/logger.js';
 import type { McpGatewayConfig } from '../config/schema.js';
 import type { McpConnection, McpRemoteTool, McpToolCallResult } from './types.js';
+import { VERSION } from '../version.js';
 
 const logger = createLogger('mcp-client-manager');
 
@@ -40,7 +41,7 @@ export class McpClientManager {
       });
 
       const client = new Client(
-        { name: 'mcp-agent-orchestrator', version: '0.1.0' },
+        { name: 'mcp-agent-orchestrator', version: VERSION },
         { capabilities: {} }
       );
 

@@ -8,6 +8,12 @@ export interface DashboardEvent {
 }
 
 class DashboardEventBus extends EventEmitter {
+  constructor() {
+    super();
+    // Many concurrent pipelines may each wait on a checkpoint event
+    this.setMaxListeners(200);
+  }
+
   emitJobEvent(type: DashboardEvent['type'], jobId: string, data: Record<string, unknown>): void {
     const event: DashboardEvent = {
       type,

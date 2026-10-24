@@ -40,9 +40,24 @@ export const InferenceProviderSchema = z.object({
   effort: z.enum(['low', 'medium', 'high', 'xhigh', 'max']).optional(),
 });
 
+export const ModelTierSchema = z.enum(['fast', 'balanced', 'heavy']);
+export type ModelTier = z.infer<typeof ModelTierSchema>;
+
+export const TierTargetSchema = z.object({
+  provider: z.string(),
+  model: z.string(),
+});
+
 export const InferenceConfigSchema = z.object({
   default_provider: z.enum(['direct', 'sampling']).default('direct'),
   providers: z.record(z.string(), InferenceProviderSchema).default({}),
+  tiers: z
+    .object({
+      fast: TierTargetSchema.optional(),
+      balanced: TierTargetSchema.optional(),
+      heavy: TierTargetSchema.optional(),
+    })
+    .optional(),
 });
 
 // ── MCP Gateways ───────────────────────────────────────────────────

@@ -3,6 +3,8 @@ dist/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/test-*.db*
+tests/fixtures/e2e/*.db*
 !data/.gitkeep
 .env
 .env.*

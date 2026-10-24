@@ -25,11 +25,24 @@ export class OpenAICompatibleProvider implements LLMProvider {
 
     const payload: any = {
       model,
-      messages: messages.map(m => ({
-        role: m.role,
-        content: m.content,
-        ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {})
-      })),
+      messages: messages.map(m => {
+        if (m.role === 'assistant' && m.tool_calls && m.tool_calls.length > 0) {
+          return {
+            role: 'assistant',
+            content: m.content,
+            tool_calls: m.tool_calls.map(tc => ({
+              id: tc.id,
+              type: 'function',
+              function: { name: tc.name, arguments: JSON.stringify(tc.arguments ?? {}) },
+            })),
+          };
+        }
+        return {
+          role: m.role,
+          content: m.content,
+          ...(m.tool_call_id ? { tool_call_id: m.tool_call_id } : {})
+        };
+      }),
       temperature: options?.temperature,
       max_tokens: options?.max_tokens,
       stop: options?.stop,

@@ -22,18 +22,34 @@ export class GeminiProvider implements LLMProvider {
     options?: CompletionOptions
   ): Promise<CompletionResponse> {
     const model = options?.model || this.defaultModel;
-    const url = `${this.baseUrl}/models/${model}:generateContent?key=${this.apiKey}`;
+    const url = `${this.baseUrl}/models/${model}:generateContent`;
 
     let systemInstruction: any = undefined;
     const contents: any[] = [];
 
+    const toolNamesById = new Map<string, string>();
+
     for (const msg of messages) {
       if (msg.role === 'system') {
         systemInstruction = { parts: [{ text: msg.content }] };
+      } else if (msg.role === 'assistant' && msg.tool_calls && msg.tool_calls.length > 0) {
+        const parts: any[] = [];
+        if (msg.content && !msg.content.startsWith('Calling ')) parts.push({ text: msg.content });
+        for (const tc of msg.tool_calls) {
+          toolNamesById.set(tc.id, tc.name);
+          parts.push({ functionCall: { name: tc.name, args: tc.arguments ?? {} } });
+        }
+        contents.push({ role: 'model', parts });
+      } else if (msg.role === 'tool') {
+        const name = (msg.tool_call_id && toolNamesById.get(msg.tool_call_id)) || 'tool';
+        contents.push({
+          role: 'user',
+          parts: [{ functionResponse: { name, response: { result: msg.content } } }]
+        });
       } else {
         contents.push({
-          role: msg.role === 'assistant' ? 'model' : (msg.role === 'tool' ? 'function' : 'user'),
-          parts: [{ text: msg.content }] 
+          role: msg.role === 'assistant' ? 'model' : 'user',
+          parts: [{ text: msg.content }]
         });
       }
     }
@@ -63,6 +79,7 @@ export class GeminiProvider implements LLMProvider {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          'x-goog-api-key': this.apiKey,
         },
         body: JSON.stringify(payload),
       });
@@ -125,8 +142,8 @@ export class GeminiProvider implements LLMProvider {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const url = `${this.baseUrl}/models/${this.defaultModel}?key=${this.apiKey}`;
-      const response = await fetch(url);
+      const url = `${this.baseUrl}/models/${this.defaultModel}`;
+      const response = await fetch(url, { headers: { 'x-goog-api-key': this.apiKey } });
       return response.ok;
     } catch (error) {
       logger.error({ error }, 'Gemini health check failed');

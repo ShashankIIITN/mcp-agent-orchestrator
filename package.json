@@ -36,9 +36,10 @@
     "build": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
-    "test": "tsx tests/verify-orchestrator.ts && tsx tests/test-session-mesh.ts",
+    "test": "tsx tests/test-path-utils.ts && tsx tests/test-security.ts && tsx tests/verify-orchestrator.ts && tsx tests/test-session-mesh.ts",
+    "test:e2e": "npm run build && tsx tests/test-e2e-stdio.ts",
     "lint": "eslint",
-    "clean": "rm -rf dist"
+    "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
