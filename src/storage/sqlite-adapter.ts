@@ -37,8 +37,42 @@ export class SqliteStorageAdapter implements StorageAdapter {
     this.db.pragma('foreign_keys = ON');
 
     this.createTables();
+    this.reconcileStaleRecords();
 
     logger.info({ path: this.dbPath }, 'SQLite storage initialized');
+  }
+
+  /**
+   * Reconcile stale 'running' sessions and synthetic interactive job rows from prior process runs
+   * so dashboard telemetry is immediately accurate on startup.
+   */
+  private reconcileStaleRecords(): void {
+    try {
+      const now = new Date().toISOString();
+      this.db
+        .prepare("UPDATE agent_sessions SET status = 'idle', updated_at = ? WHERE status = 'running'")
+        .run(now);
+
+      // Sync synthetic interactive job rows created for sessions
+      this.db.exec(`
+        UPDATE jobs
+        SET status = CASE
+              WHEN (SELECT status FROM agent_sessions WHERE agent_sessions.id = jobs.id) = 'error' THEN 'failed'
+              ELSE 'completed'
+            END,
+            progress = 100,
+            current_step = 'Session turn completed',
+            output = COALESCE(
+              output,
+              (SELECT content FROM agent_messages WHERE agent_messages.job_id = jobs.id AND role = 'assistant' ORDER BY timestamp DESC LIMIT 1)
+            )
+        WHERE mode = 'interactive'
+          AND status = 'running'
+          AND EXISTS (SELECT 1 FROM agent_sessions WHERE agent_sessions.id = jobs.id AND agent_sessions.status != 'running');
+      `);
+    } catch (err) {
+      logger.warn({ error: err }, 'Failed to reconcile stale records on init');
+    }
   }
 
   async close(): Promise<void> {
@@ -218,12 +252,21 @@ export class SqliteStorageAdapter implements StorageAdapter {
     // Ensure parent job exists to satisfy foreign key constraint
     const jobExists = this.db.prepare('SELECT 1 FROM jobs WHERE id = ?').get(jobId);
     if (!jobExists) {
+      const sess = this.db
+        .prepare('SELECT name, role, workspace_path, safety_mode FROM agent_sessions WHERE id = ?')
+        .get(jobId) as { name: string; role: string; workspace_path?: string; safety_mode?: string } | undefined;
+      const goalText = sess
+        ? `[Session] ${sess.name} — ${sess.role}`
+        : `Interactive session: ${agentId}`;
+      const wsPath = sess?.workspace_path ?? null;
+      const safety = sess?.safety_mode ?? 'semi-autonomous';
+
       this.db
         .prepare(`
-          INSERT INTO jobs (id, goal, mode, safety_mode, status, progress, created_at, updated_at)
-          VALUES (?, ?, 'interactive', 'semi-autonomous', 'running', 0, ?, ?)
+          INSERT INTO jobs (id, goal, mode, workspace_path, safety_mode, status, progress, current_step, created_at, updated_at)
+          VALUES (?, ?, 'interactive', ?, ?, 'running', 50, 'Executing turn', ?, ?)
         `)
-        .run(jobId, `Interactive session: ${agentId}`, timestamp, timestamp);
+        .run(jobId, goalText, wsPath, safety, timestamp, timestamp);
     }
 
     const stmt = this.db.prepare(`
@@ -240,6 +283,21 @@ export class SqliteStorageAdapter implements StorageAdapter {
       message.tool_calls ? JSON.stringify(message.tool_calls) : null,
       timestamp,
     );
+
+    if (message.role === 'assistant') {
+      this.db
+        .prepare(`
+          UPDATE jobs
+          SET output = ?, updated_at = ?
+          WHERE id = ? AND mode = 'interactive'
+        `)
+        .run(message.content, timestamp, jobId);
+    }
+
+    eventBus.emitJobEvent('message_logged', jobId, {
+      agentId,
+      role: message.role,
+    });
 
     return id;
   }
@@ -461,6 +519,34 @@ export class SqliteStorageAdapter implements StorageAdapter {
       now,
       sessionId,
     );
+
+    // Keep backing interactive job row (if present) synchronized with session status
+    const mappedJobStatus: JobStatus =
+      status === 'running'
+        ? 'running'
+        : status === 'error'
+          ? 'failed'
+          : 'completed';
+    const mappedProgress = status === 'running' ? 50 : 100;
+    const stepDesc =
+      status === 'running'
+        ? 'Executing in isolated context window'
+        : status === 'error'
+          ? `Error: ${updates?.last_error ?? 'Execution failed'}`
+          : status === 'terminated'
+            ? 'Session terminated'
+            : 'Idle (ready for messages)';
+
+    this.db
+      .prepare(`
+        UPDATE jobs
+        SET status = ?,
+            progress = ?,
+            current_step = ?,
+            updated_at = ?
+        WHERE id = ? AND mode = 'interactive'
+      `)
+      .run(mappedJobStatus, mappedProgress, stepDesc, now, sessionId);
 
     logger.debug({ sessionId, status }, 'Session status updated');
     eventBus.emitJobEvent('job_updated', sessionId, { type: 'session', status, ...updates });

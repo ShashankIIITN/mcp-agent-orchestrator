@@ -511,30 +511,69 @@ export class SessionManager {
     });
   }
 
+  private inferTierFromModel(model?: string): ModelTier {
+    const lower = (model ?? '').toLowerCase();
+    if (lower.includes('lite') || lower.includes('-low') || lower.includes('(low)') || lower.includes('haiku') || lower.includes('mini')) {
+      return 'fast';
+    }
+    if (lower.includes('claude') || lower.includes('argon') || lower.includes('pro') || lower.includes('opus') || lower.includes('gpt-4')) {
+      return 'heavy';
+    }
+    return 'balanced';
+  }
+
+  private async estimatePersistedTokens(sess: SessionRecord): Promise<{ used: number; saved: number }> {
+    const active = this.activeSessions.get(sess.id);
+    if (active) {
+      const state = active.runtime.getState();
+      if (state.contextTokensUsed > 0) {
+        return { used: state.contextTokensUsed, saved: state.contextFirewallSavedTokens };
+      }
+    }
+    if (sess.provider === 'host') {
+      return { used: 0, saved: 0 };
+    }
+    const messages = await this.storage.getAgentTranscript(sess.id);
+    if (messages.length === 0) {
+      return { used: 0, saved: 0 };
+    }
+    const sysChars = sess.system_prompt?.length ?? 0;
+    const msgChars = messages.reduce((sum, m) => sum + (m.content?.length ?? 0), 0);
+    // Account for multi-turn prompt accumulation + tool overhead
+    const turns = Math.max(1, messages.filter((m) => m.role === 'assistant').length);
+    const used = Math.ceil((sysChars * turns + msgChars * 1.4) / 4);
+    const lastAssistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    const returned = Math.ceil((lastAssistant?.content?.length ?? 0) / 4);
+    const saved = Math.max(0, used - returned);
+    return { used, saved };
+  }
+
   /**
    * Compute aggregate Context Firewall & Model Tier telemetry across the mesh.
    */
   async getMeshStats(): Promise<MeshStats> {
     const dbSessions = await this.storage.listSessions();
+    // Exclude synthetic host coordinator records from specialist counts
+    const specialistSessions = dbSessions.filter((s) => s.provider !== 'host');
     let totalContextTokens = 0;
     let savedTokens = 0;
     let activeCount = 0;
     const tierDist: Record<string, number> = { fast: 0, balanced: 0, heavy: 0 };
     const modelDist: Record<string, number> = {};
 
-    for (const sess of dbSessions) {
+    for (const sess of specialistSessions) {
       const container = this.activeSessions.get(sess.id);
       const status = container ? container.record.status : sess.status;
       if (status === 'running' || status === 'idle' || status === 'waiting_input') {
         activeCount++;
       }
 
-      if (container) {
-        const state = container.runtime.getState();
-        totalContextTokens += state.contextTokensUsed;
-        savedTokens += state.contextFirewallSavedTokens;
-        tierDist[container.tier] = (tierDist[container.tier] ?? 0) + 1;
-      }
+      const tier = container ? container.tier : this.inferTierFromModel(sess.model);
+      tierDist[tier] = (tierDist[tier] ?? 0) + 1;
+
+      const { used, saved } = await this.estimatePersistedTokens(sess);
+      totalContextTokens += used;
+      savedTokens += saved;
 
       if (sess.model) {
         modelDist[sess.model] = (modelDist[sess.model] ?? 0) + 1;
@@ -548,7 +587,7 @@ export class SessionManager {
         : 1;
 
     return {
-      total_sessions: dbSessions.length,
+      total_sessions: specialistSessions.length,
       active_sessions: activeCount,
       total_isolated_context_tokens: totalContextTokens,
       context_firewall_saved_tokens: savedTokens,
@@ -638,34 +677,66 @@ export class SessionManager {
     parentSessionId?: string,
     filter: 'all' | 'active' | 'my_children' = 'all',
   ): Promise<Array<SessionRecord & { tier?: ModelTier; depth?: number; context_tokens_used?: number; context_firewall_saved_tokens?: number }>> {
-    const parentFilter = filter === 'my_children' ? parentSessionId : undefined;
-    const dbSessions = await this.storage.listSessions(parentFilter);
+    const allDbSessions = await this.storage.listSessions();
+    const byId = new Map(allDbSessions.map((s) => [s.id, s]));
 
-    return dbSessions
-      .map((sess) => {
+    const computeDepth = (s: SessionRecord): number => {
+      if (s.provider === 'host' || !s.parent_session_id) return 0;
+      let d = 0;
+      let curr: SessionRecord | undefined = s;
+      const seen = new Set<string>();
+      while (curr?.parent_session_id && !seen.has(curr.id)) {
+        seen.add(curr.id);
+        const parent = byId.get(curr.parent_session_id);
+        if (!parent || parent.provider === 'host') break;
+        d++;
+        curr = parent;
+      }
+      return d;
+    };
+
+    const parentFilter = filter === 'my_children' ? parentSessionId : undefined;
+    const dbSessions = parentFilter
+      ? allDbSessions.filter((s) => s.parent_session_id === parentFilter)
+      : allDbSessions;
+
+    const enriched = await Promise.all(
+      dbSessions.map(async (sess) => {
         const active = this.activeSessions.get(sess.id);
+        const { used, saved } = await this.estimatePersistedTokens(sess);
+        const tier = active ? active.tier : this.inferTierFromModel(sess.model);
+        const depth = active ? active.depth : computeDepth(sess);
+
         if (active) {
           const state = active.runtime.getState();
           return {
             ...sess,
             status: active.record.status,
-            total_tool_calls: state.totalToolCalls,
-            iterations: state.iterations,
+            total_tool_calls: state.totalToolCalls || sess.total_tool_calls,
+            iterations: state.iterations || sess.iterations,
             last_error: state.lastError ?? sess.last_error,
-            tier: active.tier,
-            depth: active.depth,
-            context_tokens_used: state.contextTokensUsed,
-            context_firewall_saved_tokens: state.contextFirewallSavedTokens,
+            tier,
+            depth,
+            context_tokens_used: used,
+            context_firewall_saved_tokens: saved,
           };
         }
-        return sess;
-      })
-      .filter((sess) => {
-        if (filter === 'active') {
-          return sess.status === 'running' || sess.status === 'idle' || sess.status === 'waiting_input';
-        }
-        return true;
-      });
+        return {
+          ...sess,
+          tier,
+          depth,
+          context_tokens_used: used,
+          context_firewall_saved_tokens: saved,
+        };
+      }),
+    );
+
+    return enriched.filter((sess) => {
+      if (filter === 'active') {
+        return sess.status === 'running' || sess.status === 'idle' || sess.status === 'waiting_input';
+      }
+      return true;
+    });
   }
 
   /**
@@ -685,16 +756,17 @@ export class SessionManager {
     const messages = await this.storage.getAgentTranscript(sessionId);
     const inbox = await this.storage.getInboxMessages(sessionId, false);
     const active = this.activeSessions.get(sessionId);
-    const state = active?.runtime.getState();
+    const { used, saved } = session ? await this.estimatePersistedTokens(session) : { used: 0, saved: 0 };
+    const tier = active ? active.tier : this.inferTierFromModel(session?.model);
     return {
       session,
       messages,
       inbox,
-      context_stats: active && state
+      context_stats: session
         ? {
-            context_tokens_used: state.contextTokensUsed,
-            context_firewall_saved_tokens: state.contextFirewallSavedTokens,
-            tier: active.tier,
+            context_tokens_used: used,
+            context_firewall_saved_tokens: saved,
+            tier,
           }
         : undefined,
     };

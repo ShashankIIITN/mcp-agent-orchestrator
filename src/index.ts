@@ -27,6 +27,7 @@ Model Context Protocol multi-agent coordination kernel and context firewall.
 
 USAGE:
   mcp-agent-orchestrator [configPath]      Start MCP server over stdio (default)
+  mcp-agent-orchestrator dashboard [cfg]   Start standalone Web Dashboard server (http://localhost:4000)
   mcp-agent-orchestrator init              Create starter orchestrator.yaml in current directory
   mcp-agent-orchestrator doctor            Run system diagnostic & provider health checks
   mcp-agent-orchestrator --version, -v     Print version
@@ -139,6 +140,16 @@ pipelines:
       process.exit(1);
     }
     process.exit(0);
+  }
+
+  // ── 4b. Standalone Dashboard Command ────────────────────────────
+  if (arg === 'dashboard') {
+    const configPath = process.argv[3] || undefined;
+    const server = new OrchestratorServer(configPath);
+    await server.getStorage().init();
+    await server.getDashboardServer().start();
+    logger.info('Standalone Web Dashboard running at http://localhost:' + server.getConfig().server.port);
+    return;
   }
 
   // ── 5. Default: Start MCP Server ────────────────────────────────

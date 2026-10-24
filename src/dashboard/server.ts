@@ -136,6 +136,43 @@ export class DashboardServer {
 
     // ── REST API ─────────────────────────────────────────────────────
 
+    // GET /api/overview
+    if (pathname === '/api/overview' && method === 'GET') {
+      const [jobs, sessions, mesh_stats] = await Promise.all([
+        this.storage.listJobs(100),
+        this.sessionManager ? this.sessionManager.listSessions() : this.storage.listSessions(),
+        this.sessionManager ? this.sessionManager.getMeshStats() : Promise.resolve(undefined),
+      ]);
+
+      const job_stats = {
+        total: jobs.length,
+        running: jobs.filter((j) => j.status === 'running').length,
+        completed: jobs.filter((j) => j.status === 'completed').length,
+        failed: jobs.filter((j) => j.status === 'failed').length,
+        waiting_approval: jobs.filter((j) => j.status === 'waiting_approval').length,
+        swarm_count: jobs.filter((j) => j.mode === 'swarm').length,
+        pipeline_count: jobs.filter((j) => j.mode === 'pipeline').length,
+        interactive_count: jobs.filter((j) => j.mode === 'interactive').length,
+      };
+
+      const mem = process.memoryUsage();
+      const system = {
+        uptime_seconds: Math.round(process.uptime()),
+        memory_rss_mb: Math.round((mem.rss / 1024 / 1024) * 10) / 10,
+        heap_used_mb: Math.round((mem.heapUsed / 1024 / 1024) * 10) / 10,
+        platform: process.platform,
+        node_version: process.version,
+        safety_mode: this.config.server.security.default_safety_mode,
+        providers: Object.keys(this.config.inference.providers),
+        tiers: this.config.inference.tiers ?? {},
+        agents_count: Object.keys(this.config.agents).length,
+        pipelines_count: Object.keys(this.config.pipelines).length,
+      };
+
+      this.sendJson(res, 200, { mesh_stats, job_stats, system, session_count: sessions.length });
+      return;
+    }
+
     // GET /api/jobs
     if (pathname === '/api/jobs' && method === 'GET') {
       const limit = Number(url.searchParams.get('limit') ?? '50');
@@ -227,6 +264,122 @@ export class DashboardServer {
         : await this.storage.listSessions();
       const mesh_stats = this.sessionManager ? await this.sessionManager.getMeshStats() : undefined;
       this.sendJson(res, 200, { sessions, mesh_stats });
+      return;
+    }
+
+    // POST /api/sessions (Spawn a new session from Dashboard UI)
+    if (pathname === '/api/sessions' && method === 'POST') {
+      if (!this.sessionManager) {
+        this.sendJson(res, 400, { error: 'SessionManager not available' });
+        return;
+      }
+      try {
+        const body = await this.readJsonBody(req);
+        const result = await this.sessionManager.invokeSession({
+          name: typeof body.name === 'string' && body.name.trim() ? body.name.trim() : undefined,
+          role: typeof body.role === 'string' && body.role.trim() ? body.role.trim() : undefined,
+          system_prompt:
+            typeof body.system_prompt === 'string' && body.system_prompt.trim()
+              ? body.system_prompt.trim()
+              : undefined,
+          agent_preset:
+            typeof body.agent_preset === 'string' && body.agent_preset.trim()
+              ? body.agent_preset.trim()
+              : undefined,
+          tier:
+            body.tier === 'fast' || body.tier === 'balanced' || body.tier === 'heavy'
+              ? body.tier
+              : undefined,
+          model: typeof body.model === 'string' && body.model.trim() ? body.model.trim() : undefined,
+          provider:
+            typeof body.provider === 'string' && body.provider.trim()
+              ? body.provider.trim()
+              : undefined,
+          workspace_path:
+            typeof body.workspace_path === 'string' && body.workspace_path.trim()
+              ? body.workspace_path.trim()
+              : './',
+          initial_message:
+            typeof body.initial_message === 'string' && body.initial_message.trim()
+              ? body.initial_message.trim()
+              : undefined,
+          await_response: Boolean(body.await_response),
+          parent_session_id:
+            typeof body.parent_session_id === 'string' && body.parent_session_id.trim()
+              ? body.parent_session_id.trim()
+              : 'dashboard-coordinator',
+        });
+        this.sendJson(res, 200, result);
+      } catch (err) {
+        this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // POST /api/sessions/kill-all
+    if (pathname === '/api/sessions/kill-all' && method === 'POST') {
+      if (!this.sessionManager) {
+        this.sendJson(res, 400, { error: 'SessionManager not available' });
+        return;
+      }
+      const result = await this.sessionManager.killAllSessions();
+      this.sendJson(res, 200, result);
+      return;
+    }
+
+    // POST /api/sessions/:id/message
+    const sessionMsgMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/message$/);
+    if (sessionMsgMatch && method === 'POST') {
+      if (!this.sessionManager) {
+        this.sendJson(res, 400, { error: 'SessionManager not available' });
+        return;
+      }
+      try {
+        const sessionId = sessionMsgMatch[1];
+        const body = await this.readJsonBody(req);
+        const content = typeof body.content === 'string' ? body.content.trim() : '';
+        if (!content) {
+          this.sendJson(res, 400, { error: 'Message content is required' });
+          return;
+        }
+        const result = await this.sessionManager.sendSessionMessage({
+          target_session_id: sessionId,
+          content,
+          sender_session_id: 'dashboard-coordinator',
+          await_response: Boolean(body.await_response),
+        });
+        this.sendJson(res, 200, result);
+      } catch (err) {
+        this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
+
+    // POST /api/sessions/:id/action (pause | resume | terminate)
+    const sessionActionMatch = pathname.match(/^\/api\/sessions\/([^/]+)\/action$/);
+    if (sessionActionMatch && method === 'POST') {
+      if (!this.sessionManager) {
+        this.sendJson(res, 400, { error: 'SessionManager not available' });
+        return;
+      }
+      try {
+        const sessionId = sessionActionMatch[1];
+        const body = await this.readJsonBody(req);
+        const action = String(body.action ?? '');
+        if (action === 'pause') {
+          await this.sessionManager.pauseSession(sessionId);
+        } else if (action === 'resume') {
+          await this.sessionManager.resumeSession(sessionId);
+        } else if (action === 'terminate') {
+          await this.sessionManager.terminateSession(sessionId);
+        } else {
+          this.sendJson(res, 400, { error: `Unknown action: ${action}` });
+          return;
+        }
+        this.sendJson(res, 200, { success: true, sessionId, action });
+      } catch (err) {
+        this.sendJson(res, 400, { error: err instanceof Error ? err.message : String(err) });
+      }
       return;
     }
 

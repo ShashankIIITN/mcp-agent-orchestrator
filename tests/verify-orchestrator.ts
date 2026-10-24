@@ -148,6 +148,12 @@ async function runVerification() {
   const dashHtml = await dashRes.text();
   assert.ok(dashHtml.includes('Orchestrator Dashboard'));
 
+  const overviewRes = await fetch('http://localhost:4001/api/overview');
+  assert.strictEqual(overviewRes.status, 200);
+  const overviewData = await overviewRes.json();
+  assert.ok(overviewData.job_stats);
+  assert.ok(overviewData.system);
+
   const jobsRes = await fetch('http://localhost:4001/api/jobs');
   assert.strictEqual(jobsRes.status, 200);
   const jobsData = await jobsRes.json();
