@@ -456,16 +456,28 @@ export class AgyProvider implements LLMProvider {
     }
     formatted += `[/ORCHESTRATOR WORKER CONTEXT]\n\n`;
 
-    for (const msg of messages) {
+    const lastIdx = messages.length - 1;
+    for (let idx = 0; idx < messages.length; idx++) {
+      const msg = messages[idx];
+      const isHistoricalTurn = idx > 0 && idx < lastIdx;
+      const body =
+        isHistoricalTurn && msg.content.length > 1200
+          ? `${msg.content.slice(0, 1200)}\n...[prior turn truncated to fit CLI argument limit]...`
+          : msg.content;
+
       if (msg.role === 'system') {
-        formatted += `[SPECIALIST ROLE & SYSTEM PROMPT]:\n${msg.content}\n\n`;
+        formatted += `[SPECIALIST ROLE & SYSTEM PROMPT]:\n${body}\n\n`;
       } else if (msg.role === 'user') {
-        formatted += `[USER TASK]:\n${msg.content}\n\n`;
+        formatted += `[USER TASK]:\n${body}\n\n`;
       } else if (msg.role === 'assistant') {
-        formatted += `[ASSISTANT]:\n${msg.content}\n\n`;
+        formatted += `[ASSISTANT]:\n${body}\n\n`;
       } else if (msg.role === 'tool') {
-        formatted += `[TOOL RESULT${msg.tool_call_id ? ` id=${msg.tool_call_id}` : ''}]:\n${msg.content}\n\n`;
+        formatted += `[TOOL RESULT${msg.tool_call_id ? ` id=${msg.tool_call_id}` : ''}]:\n${body}\n\n`;
       }
+    }
+
+    if (formatted.length > 14000) {
+      formatted = `${formatted.slice(0, 6000)}\n...[intermediate history condensed]...\n${formatted.slice(-7500)}`;
     }
 
     formatted += `Provide your complete, thorough response below:`;
