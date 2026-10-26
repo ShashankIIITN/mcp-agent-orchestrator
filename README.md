@@ -90,14 +90,14 @@ flowchart TD
 ### 1. Instant Run with `uvx` / `pip` (PyPI)
 ```bash
 # Run directly via uvx (zero install) or install from PyPI
-uvx agent-mesh-mcp doctor
-pip install agent-mesh-mcp
+uvx session-mesh-mcp doctor
+pip install session-mesh-mcp
 
 # Start the MCP server over stdio
-agent-mesh-mcp serve
+session-mesh-mcp serve
 
 # Launch the live Web Dashboard on http://localhost:4000
-agent-mesh-mcp dashboard
+session-mesh-mcp dashboard
 ```
 
 ### 2. Instant Run with `npx` (Node.js)

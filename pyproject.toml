@@ -3,7 +3,7 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "agent-mesh-mcp"
+name = "session-mesh-mcp"
 version = "0.2.0"
 description = "Model Context Protocol multi-agent coordination kernel, cross-session mesh, and context firewall."
 readme = "README.md"
@@ -41,6 +41,7 @@ Repository = "https://github.com/ShashankIIITN/agent-mesh-mcp"
 Issues = "https://github.com/ShashankIIITN/agent-mesh-mcp/issues"
 
 [project.scripts]
+session-mesh-mcp = "mcp_agent_orchestrator.cli:main"
 agent-mesh-mcp = "mcp_agent_orchestrator.cli:main"
 mcp-agent-orchestrator = "mcp_agent_orchestrator.cli:main"
 agent-orchestrator = "mcp_agent_orchestrator.cli:main"
