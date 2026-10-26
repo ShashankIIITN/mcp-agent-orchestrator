@@ -1,0 +1,4 @@
+include README.md
+include LICENSE
+include orchestrator.example.yaml
+recursive-include mcp_agent_orchestrator/_runtime *

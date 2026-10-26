@@ -12,3 +12,8 @@ tests/fixtures/e2e/*.db*
 .DS_Store
 Thumbs.db
 scaffold.ps1
+build/
+*.egg-info/
+__pycache__/
+*.pyc
+mcp_agent_orchestrator/_runtime/

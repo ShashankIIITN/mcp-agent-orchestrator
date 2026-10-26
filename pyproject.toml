@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mcp-agent-orchestrator"
+version = "0.2.0"
+description = "Model Context Protocol multi-agent coordination kernel, cross-session mesh, and context firewall."
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "Shashank Tripathi", email = "shashanktripathi.st15a@gmail.com" },
+]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "agent",
+    "orchestrator",
+    "multi-agent",
+    "swarm",
+    "agent-mesh",
+    "context-firewall",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/ShashankIIITN/mcp-agent-orchestrator"
+Repository = "https://github.com/ShashankIIITN/mcp-agent-orchestrator"
+Issues = "https://github.com/ShashankIIITN/mcp-agent-orchestrator/issues"
+
+[project.scripts]
+mcp-agent-orchestrator = "mcp_agent_orchestrator.cli:main"
+agent-orchestrator = "mcp_agent_orchestrator.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["mcp_agent_orchestrator*"]
+
+[tool.setuptools.package-data]
+mcp_agent_orchestrator = ["_runtime/**/*", "_runtime/*"]

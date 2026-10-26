@@ -1,0 +1,74 @@
+name: Publish to PyPI
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+concurrency:
+  group: pypi-publish-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    # Required for Trusted Publishing (OIDC) & automatic GitHub Release creation on tag push
+    permissions:
+      id-token: write
+      contents: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Build TypeScript Runtime Bundle
+        run: |
+          npm ci
+          npm run build
+          mkdir -p mcp_agent_orchestrator/_runtime
+          cp -r dist mcp_agent_orchestrator/_runtime/dist
+          cp package.json package-lock.json orchestrator.example.yaml mcp_agent_orchestrator/_runtime/
+          rm -rf dist
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install Build Tools
+        run: python -m pip install --upgrade pip build
+
+      - name: Dynamically Update Version from Tag
+        run: |
+          # Extract version from GitHub tag (e.g., refs/tags/v0.2.0 or v0.2.0 -> 0.2.0)
+          RAW_TAG="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ] || [ "$VERSION" = "master" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "Release tag detected. Injecting version $VERSION into pyproject.toml and __init__.py"
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/^__version__ = .*/__version__ = \"$VERSION\"/" mcp_agent_orchestrator/__init__.py
+
+      - name: Build Package
+        run: python -m build
+
+      - name: Create GitHub Release (when triggered via tag push)
+        if: startsWith(github.ref, 'refs/tags/v') && github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: dist/*
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
