@@ -36,9 +36,9 @@ classifiers = [
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/ShashankIIITN/agent-mesh-mcp"
-Repository = "https://github.com/ShashankIIITN/agent-mesh-mcp"
-Issues = "https://github.com/ShashankIIITN/agent-mesh-mcp/issues"
+Homepage = "https://github.com/ShashankIIITN/session-mesh-mcp"
+Repository = "https://github.com/ShashankIIITN/session-mesh-mcp"
+Issues = "https://github.com/ShashankIIITN/session-mesh-mcp/issues"
 
 [project.scripts]
 session-mesh-mcp = "mcp_agent_orchestrator.cli:main"

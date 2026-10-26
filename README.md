@@ -103,19 +103,19 @@ session-mesh-mcp dashboard
 ### 2. Instant Run with `npx` (Node.js)
 ```bash
 # Run the built-in system diagnostics & health check
-npx agent-mesh-mcp doctor
+npx session-mesh-mcp doctor
 
 # Generate a starter orchestrator.yaml in your current directory
-npx agent-mesh-mcp init
+npx session-mesh-mcp init
 
 # Start the MCP server over stdio
-npx agent-mesh-mcp
+npx session-mesh-mcp
 ```
 
 ### 3. Local Development & Build
 ```bash
-git clone https://github.com/ShashankIIITN/agent-mesh-mcp.git
-cd agent-mesh-mcp
+git clone https://github.com/ShashankIIITN/session-mesh-mcp.git
+cd session-mesh-mcp
 
 # Install dependencies and compile TypeScript
 npm install

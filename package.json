@@ -1,20 +1,21 @@
 {
-  "name": "agent-mesh-mcp",
+  "name": "session-mesh-mcp",
   "version": "0.2.0",
   "description": "Model Context Protocol multi-agent coordination kernel, cross-session mesh, and context firewall.",
   "author": "Shashank Tripathi <shashanktripathi.st15a@gmail.com>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/ShashankIIITN/agent-mesh-mcp.git"
+    "url": "https://github.com/ShashankIIITN/session-mesh-mcp.git"
   },
-  "homepage": "https://github.com/ShashankIIITN/agent-mesh-mcp#readme",
+  "homepage": "https://github.com/ShashankIIITN/session-mesh-mcp#readme",
   "bugs": {
-    "url": "https://github.com/ShashankIIITN/agent-mesh-mcp/issues"
+    "url": "https://github.com/ShashankIIITN/session-mesh-mcp/issues"
   },
   "type": "module",
   "main": "dist/index.js",
   "bin": {
+    "session-mesh-mcp": "dist/index.js",
     "agent-mesh-mcp": "dist/index.js",
     "mcp-agent-orchestrator": "dist/index.js"
   },
