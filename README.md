@@ -87,34 +87,35 @@ flowchart TD
 
 ## ⚡ Quick Start & CLI
 
-### 1. Instant Run with `npx` (Zero Installation Required!)
-You can run the orchestrator immediately without cloning or manually configuring:
-
+### 1. Instant Run with `uvx` / `pip` (PyPI)
 ```bash
-# Run the built-in system diagnostics & health check
-npx mcp-agent-orchestrator doctor
-
-# Generate a starter orchestrator.yaml in your current directory
-npx mcp-agent-orchestrator init
+# Run directly via uvx (zero install) or install from PyPI
+uvx agent-mesh-mcp doctor
+pip install agent-mesh-mcp
 
 # Start the MCP server over stdio
-npx mcp-agent-orchestrator
+agent-mesh-mcp serve
+
+# Launch the live Web Dashboard on http://localhost:4000
+agent-mesh-mcp dashboard
 ```
 
-### 2. Global Installation (Optional)
+### 2. Instant Run with `npx` (Node.js)
 ```bash
-npm install -g mcp-agent-orchestrator
+# Run the built-in system diagnostics & health check
+npx agent-mesh-mcp doctor
 
-# Now available anywhere in your terminal
-mcp-agent-orchestrator doctor
-mcp-agent-orchestrator init
-mcp-agent-orchestrator
+# Generate a starter orchestrator.yaml in your current directory
+npx agent-mesh-mcp init
+
+# Start the MCP server over stdio
+npx agent-mesh-mcp
 ```
 
 ### 3. Local Development & Build
 ```bash
-git clone https://github.com/ShashankIIITN/mcp-agent-orchestrator.git
-cd mcp-agent-orchestrator
+git clone https://github.com/ShashankIIITN/agent-mesh-mcp.git
+cd agent-mesh-mcp
 
 # Install dependencies and compile TypeScript
 npm install
