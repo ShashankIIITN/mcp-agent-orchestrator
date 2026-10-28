@@ -1,13 +1,17 @@
-# ⚡ MCP Agent Orchestrator
+# ⚡ session-mesh-mcp — MCP Agent Orchestrator
 
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.8-blue.svg)](https://www.typescriptlang.org/)
 [![MCP](https://img.shields.io/badge/Model_Context_Protocol-1.12-green.svg)](https://modelcontextprotocol.io/)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/Tests-29%2F29_Passing-brightgreen.svg)]()
+[![Tests](https://img.shields.io/badge/Tests-32%2F32_Passing-brightgreen.svg)]()
 
 An open, extensible **Model Context Protocol (MCP)** server that acts as a scalable, multi-modal **multi-agent coordination engine**.
 
 It allows any MCP-compatible client (**Claude Desktop**, **Cursor**, **Antigravity**, **Zed**, **LibreChat**) to delegate complex multi-step programming and research goals to internal teams of specialized subagents — acting as a **context firewall** to conserve client token limits while preventing tool timeouts.
+
+---
+
+> **Naming note:** The canonical name of this project is **`session-mesh-mcp`** — it is used consistently for the GitHub repository, the npm package, and the PyPI package. The legacy CLI aliases `agent-mesh-mcp`, `mcp-agent-orchestrator`, and `agent-orchestrator` are **deprecated**: they still work today, but new setups should use `session-mesh-mcp`, and the aliases will be removed in a future major release. (The Python wrapper's internal module name, `mcp_agent_orchestrator`, is not user-facing.)
 
 ---
 
@@ -121,7 +125,8 @@ cd session-mesh-mcp
 npm install
 npm run build
 
-# Run all 14 unit and integration tests
+# Run all 32 unit and integration test scenarios
+# (plus the stdio end-to-end smoke test via: npm run test:e2e)
 npm test
 ```
 
@@ -265,10 +270,10 @@ To register the orchestrator globally in your local Antigravity environment:
 
 ```powershell
 # Using npx (portable):
-agy mcp add agent-orchestrator npx -y mcp-agent-orchestrator
+agy mcp add session-mesh npx -y session-mesh-mcp
 
 # OR using local build:
-agy mcp add agent-orchestrator node "D:\my project\mcp-agent-orchestrator\dist\index.js" "D:\my project\mcp-agent-orchestrator\orchestrator.yaml"
+agy mcp add session-mesh node "D:\my project\session-mesh-mcp\dist\index.js" "D:\my project\session-mesh-mcp\orchestrator.yaml"
 ```
 
 Verify it is active:
@@ -286,13 +291,13 @@ Add to your `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Librar
   "mcpServers": {
     "agent-orchestrator": {
       "command": "npx",
-      "args": ["-y", "mcp-agent-orchestrator"]
+      "args": ["-y", "session-mesh-mcp"]
     }
   }
 }
 ```
 
-*(Or replace `"command": "node"` and point to `"D:\\my project\\mcp-agent-orchestrator\\dist\\index.js"` for local development).*
+*(Or replace `"command": "node"` and point to `"D:\\my project\\session-mesh-mcp\\dist\\index.js"` for local development).*
 
 ---
 
@@ -303,9 +308,9 @@ Add to your `%APPDATA%\Claude\claude_desktop_config.json` (Windows) or `~/Librar
    * **Type**: `command`
    * **Command**:
      ```bash
-     npx -y mcp-agent-orchestrator
+     npx -y session-mesh-mcp
      ```
-     *(Or `node "D:\my project\mcp-agent-orchestrator\dist\index.js"`)*
+     *(Or `node "D:\my project\session-mesh-mcp\dist\index.js"`)*
 
 ---
 
@@ -445,7 +450,7 @@ Runs on **Windows, macOS, and Linux** (Node.js ≥ 20).
 * `allowed_workspaces` accepts `~` and absolute paths. Windows drive roots such as `D:/` are ignored on macOS/Linux, so one config file works everywhere.
 * Local build on macOS/Linux:
   ```bash
-  agy mcp add agent-orchestrator node "$PWD/dist/index.js" "$PWD/orchestrator.yaml"
+  agy mcp add session-mesh node "$PWD/dist/index.js" "$PWD/orchestrator.yaml"
   ```
 
 ---
