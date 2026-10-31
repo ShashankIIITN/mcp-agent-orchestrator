@@ -1,4 +1,4 @@
-name: Publish to PyPI
+name: Publish to PyPI & npm
 
 on:
   release:
@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: pypi-publish-${{ github.ref_name }}
+  group: release-publish-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -31,10 +31,31 @@ jobs:
           node-version: "22"
           cache: "npm"
 
-      - name: Build TypeScript Runtime Bundle
+      - name: Dynamically Update Version from Tag
         run: |
-          npm ci
+          # Extract version from GitHub tag (e.g., refs/tags/v0.2.0 or v0.2.0 -> 0.2.0)
+          RAW_TAG="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
+          VERSION="${RAW_TAG#v}"
+          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ] || [ "$VERSION" = "master" ]; then
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "Release tag detected. Injecting version $VERSION into package.json, pyproject.toml, and __init__.py"
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
+          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
+          sed -i "s/^__version__ = .*/__version__ = \"$VERSION\"/" mcp_agent_orchestrator/__init__.py
+
+      - name: Build TypeScript Runtime
+        run: |
+          npm install
           npm run build
+
+      - name: Publish to npm (OIDC Trusted Publishing)
+        run: |
+          npm install -g npm@latest
+          npm publish --provenance --access public
+
+      - name: Stage Python Runtime Bundle
+        run: |
           mkdir -p mcp_agent_orchestrator/_runtime
           cp -r dist mcp_agent_orchestrator/_runtime/dist
           cp package.json package-lock.json orchestrator.example.yaml mcp_agent_orchestrator/_runtime/
@@ -48,19 +69,7 @@ jobs:
       - name: Install Build Tools
         run: python -m pip install --upgrade pip build
 
-      - name: Dynamically Update Version from Tag
-        run: |
-          # Extract version from GitHub tag (e.g., refs/tags/v0.2.0 or v0.2.0 -> 0.2.0)
-          RAW_TAG="${GITHUB_REF_NAME:-${GITHUB_REF#refs/tags/}}"
-          VERSION="${RAW_TAG#v}"
-          if [ -z "$VERSION" ] || [ "$VERSION" = "main" ] || [ "$VERSION" = "master" ]; then
-            VERSION=$(node -p "require('./package.json').version")
-          fi
-          echo "Release tag detected. Injecting version $VERSION into pyproject.toml and __init__.py"
-          sed -i "s/^version = .*/version = \"$VERSION\"/" pyproject.toml
-          sed -i "s/^__version__ = .*/__version__ = \"$VERSION\"/" mcp_agent_orchestrator/__init__.py
-
-      - name: Build Package
+      - name: Build Python Package
         run: python -m build
 
       - name: Create GitHub Release (when triggered via tag push)

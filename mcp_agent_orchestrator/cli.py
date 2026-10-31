@@ -60,7 +60,7 @@ def _resolve_runtime_entrypoint() -> Path:
         if not npm_bin:
             sys.stderr.write(
                 "Error: 'npm' is required to initialize mcp-agent-orchestrator runtime dependencies. "
-                "Please install Node.js (>=20).\n"
+                "Please install Node.js (>=22.5).\n"
             )
             sys.exit(1)
 
@@ -80,7 +80,7 @@ def main() -> None:
     node_bin = shutil.which("node.exe" if platform.system() == "Windows" else "node") or shutil.which("node")
     if not node_bin:
         sys.stderr.write(
-            "Error: Node.js (>=20) is required to run mcp-agent-orchestrator, but 'node' was not found on PATH.\n"
+            "Error: Node.js (>=22.5) is required to run mcp-agent-orchestrator, but 'node' was not found on PATH.\n"
         )
         sys.exit(1)
 

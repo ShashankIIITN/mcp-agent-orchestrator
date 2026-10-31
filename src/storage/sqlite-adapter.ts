@@ -1,4 +1,4 @@
-import Database from 'better-sqlite3';
+import { DatabaseSync } from 'node:sqlite';
 import { nanoid } from 'nanoid';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -19,7 +19,7 @@ import type {
 const logger = createLogger('sqlite-adapter');
 
 export class SqliteStorageAdapter implements StorageAdapter {
-  private db!: Database.Database;
+  private db!: DatabaseSync;
   private readonly dbPath: string;
 
   constructor(dbPath: string) {
@@ -30,11 +30,10 @@ export class SqliteStorageAdapter implements StorageAdapter {
     // Ensure the parent directory exists
     mkdirSync(dirname(this.dbPath), { recursive: true });
 
-    this.db = new Database(this.dbPath);
+    this.db = new DatabaseSync(this.dbPath);
 
-    // Enable WAL mode for better concurrent read performance
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('foreign_keys = ON');
+    // Enable WAL mode and foreign key constraints
+    this.db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
 
     this.createTables();
     this.reconcileStaleRecords();
